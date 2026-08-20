@@ -337,6 +337,7 @@ C:\pukimod reborn\src\game\client\vgui_slideshow_display_screen.cpp;C:\pukimod r
 C:\pukimod reborn\src\game\client\vgui_spawnmenu.cpp;C:\pukimod reborn\src\game\client\Release_mod_hl2mp\vgui_spawnmenu.obj
 C:\pukimod reborn\src\game\client\vgui_video.cpp;C:\pukimod reborn\src\game\client\Release_mod_hl2mp\vgui_video.obj
 C:\pukimod reborn\src\game\client\vgui_video_player.cpp;C:\pukimod reborn\src\game\client\Release_mod_hl2mp\vgui_video_player.obj
+C:\pukimod reborn\src\game\client\vgui_webbrowser.cpp;C:\pukimod reborn\src\game\client\Release_mod_hl2mp\vgui_webbrowser.obj
 C:\pukimod reborn\src\game\client\view.cpp;C:\pukimod reborn\src\game\client\Release_mod_hl2mp\view.obj
 C:\pukimod reborn\src\game\client\view_beams.cpp;C:\pukimod reborn\src\game\client\Release_mod_hl2mp\view_beams.obj
 C:\pukimod reborn\src\game\client\view_effects.cpp;C:\pukimod reborn\src\game\client\Release_mod_hl2mp\view_effects.obj

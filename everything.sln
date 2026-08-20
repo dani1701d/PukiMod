@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.37328.6 d17.14
+VisualStudioVersion = 17.14.37328.6
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Client (HL2MP)", "game\client\client_win64_hl2mp.vcxproj", "{9FAF1D34-5CB8-FE30-8550-6B2D1235E43C}"
 	ProjectSection(ProjectDependencies) = postProject
@@ -40,11 +40,6 @@ EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Motion Mapper", "utils\motionmapper\motionmapper_win64.vcxproj", "{9CBDF2C8-A7F0-D19B-2072-B51E442C93AD}"
 	ProjectSection(ProjectDependencies) = postProject
 		{B3B0E171-C7B1-7BE0-4D0E-2F4B370C6085} = {B3B0E171-C7B1-7BE0-4D0E-2F4B370C6085}
-		{ABFCC7A6-84D6-E359-05BF-BDC09C31002D} = {ABFCC7A6-84D6-E359-05BF-BDC09C31002D}
-	EndProjectSection
-EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "QC Eyes", "utils\qc_eyes\qc_eyes_win64.vcxproj", "{A4D0A120-7C78-A069-7599-7B2ADF29A77D}"
-	ProjectSection(ProjectDependencies) = postProject
 		{ABFCC7A6-84D6-E359-05BF-BDC09C31002D} = {ABFCC7A6-84D6-E359-05BF-BDC09C31002D}
 	EndProjectSection
 EndProject
@@ -168,10 +163,6 @@ Global
 		{9CBDF2C8-A7F0-D19B-2072-B51E442C93AD}.Debug|win64.Build.0 = Debug|x64
 		{9CBDF2C8-A7F0-D19B-2072-B51E442C93AD}.Release|win64.ActiveCfg = Release|x64
 		{9CBDF2C8-A7F0-D19B-2072-B51E442C93AD}.Release|win64.Build.0 = Release|x64
-		{A4D0A120-7C78-A069-7599-7B2ADF29A77D}.Debug|win64.ActiveCfg = Debug|x64
-		{A4D0A120-7C78-A069-7599-7B2ADF29A77D}.Debug|win64.Build.0 = Debug|x64
-		{A4D0A120-7C78-A069-7599-7B2ADF29A77D}.Release|win64.ActiveCfg = Release|x64
-		{A4D0A120-7C78-A069-7599-7B2ADF29A77D}.Release|win64.Build.0 = Release|x64
 		{A044B9B3-572B-23D3-5476-077522D12335}.Debug|win64.ActiveCfg = Debug|x64
 		{A044B9B3-572B-23D3-5476-077522D12335}.Debug|win64.Build.0 = Debug|x64
 		{A044B9B3-572B-23D3-5476-077522D12335}.Release|win64.ActiveCfg = Release|x64
