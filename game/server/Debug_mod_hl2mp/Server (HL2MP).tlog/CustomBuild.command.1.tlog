@@ -1,0 +1,4 @@
+^C:\PUKIMOD REBORN\SRC\GAME\SERVER\SPAWN_HELPER.NUT
+python ..\..\devtools\bin\texttoarray.py C:\pukimod reborn\src\game\server\spawn_helper.nut g_Script_spawn_helper> spawn_helper_nut.h
+^C:\PUKIMOD REBORN\SRC\GAME\SERVER\VSCRIPT_SERVER.NUT
+python ..\..\devtools\bin\texttoarray.py C:\pukimod reborn\src\game\server\vscript_server.nut g_Script_vscript_server> vscript_server_nut.h
