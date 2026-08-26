@@ -3851,7 +3851,6 @@ void CLogicPlayerProxy::InputSetPlayerHealth( inputdata_t &inputdata )
 		return;
 
 	m_hPlayer->SetHealth( inputdata.value.Int() );
-
 }
 
 void CLogicPlayerProxy::InputRequestPlayerHealth( inputdata_t &inputdata )
