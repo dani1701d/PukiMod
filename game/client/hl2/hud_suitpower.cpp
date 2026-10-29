@@ -1,3 +1,5 @@
+#include "cbase.h"
+/*
 //========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
@@ -253,5 +255,4 @@ void CHudSuitPower::Paint()
 		}
 	}
 }
-
-
+*/

@@ -16,7 +16,9 @@ public:
     void RegGlobals();
     void RegFunctions();
 
-    void CallHook(const char* hookName, CBasePlayer* pPlayer);
+    void Think();
+    void CallPlayerHook(const char* hookName, CBasePlayer* pPlayer);
+    void CallHook(const char* hookName);
     void LoadAddons(); // Серверный метод
     void LoadClientAddons(); // Клиентский метод
 
@@ -24,6 +26,7 @@ public:
 
 private:
     lua_State* m_pLuaState;
+    double m_flLastThinkTime = 0.0;
 };
 
 // Объявляем глобальный указатель, чтобы вызывать менеджер из любой точки мода

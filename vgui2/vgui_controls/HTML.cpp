@@ -12,6 +12,7 @@
 #include <vgui_controls/EditablePanel.h>
 #include <vgui_controls/Menu.h>
 #include <vgui_controls/MessageBox.h>
+#include <cdll_int.h>
 
 #include "filesystem.h"
 #include "../vgui2/src/vgui_key_translation.h"
@@ -25,6 +26,7 @@
 #include "tier0/memdbgon.h"
 
 using namespace vgui;
+extern IVEngineClient* engine;
 
 //-----------------------------------------------------------------------------
 // Purpose: A simple passthrough panel to render the border onto the HTML widget
@@ -1223,7 +1225,6 @@ void HTML::CHTMLFindBar::OnCommand( const char *pchCmd )
 	}
 	else
 		BaseClass::OnCommand( pchCmd );
-
 }
 
 
@@ -1734,14 +1735,29 @@ void HTML::BrowserLinkAtPositionResponse( HTML_LinkAtPosition_t *pCmd )
 //-----------------------------------------------------------------------------
 // Purpose: browser telling us to pop a javascript alert dialog
 //-----------------------------------------------------------------------------
-void HTML::BrowserJSAlert( HTML_JSAlert_t *pCmd )
+void HTML::BrowserJSAlert(HTML_JSAlert_t* pCmd)
 {
-	MessageBox *pDlg = new MessageBox( m_sCurrentURL, (const char *)pCmd->pchMessage, this );
-	pDlg->AddActionSignalTarget( this );
-	pDlg->SetCommand( new KeyValues( "DismissJSDialog", "result", false ) );
+	if (pCmd && pCmd->pchMessage)
+	{
+		if (Q_strnicmp(pCmd->pchMessage, "action:", 7) == 0)
+		{
+			const char* cmd = pCmd->pchMessage + 7;
+
+			// ќЅя«ј“≈Ћ№Ќќ: разблокировать JS-поток страницы
+			DismissJSDialog(true);
+
+			if (engine && cmd[0] != '\0')
+				engine->ClientCmd_Unrestricted(cmd);
+
+			return;
+		}
+	}
+
+	MessageBox* pDlg = new MessageBox(m_sCurrentURL, (const char*)pCmd->pchMessage, this);
+	pDlg->AddActionSignalTarget(this);
+	pDlg->SetCommand(new KeyValues("DismissJSDialog", "result", false));
 	pDlg->DoModal();
 }
-
 
 //-----------------------------------------------------------------------------
 // Purpose: browser telling us to pop a js confirm dialog

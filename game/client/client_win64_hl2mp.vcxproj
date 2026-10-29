@@ -193,6 +193,7 @@ if "%valveTmpIsReadOnlyLetter%"=="R" del /q "$(TargetDir)"$(TargetFileName)
       <BrowseInformationFile>$(IntDir)/</BrowseInformationFile>
       <ErrorReporting>Prompt</ErrorReporting>
       <BuildStlModules>false</BuildStlModules>
+      <LanguageStandard>stdcpp14</LanguageStandard>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>;NDEBUG;_CRT_SECURE_NO_DEPRECATE;_CRT_NONSTDC_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -201,11 +202,11 @@ if "%valveTmpIsReadOnlyLetter%"=="R" del /q "$(TargetDir)"$(TargetFileName)
     <PreLinkEvent />
     <Link>
       <AdditionalOptions> /ignore:4221</AdditionalOptions>
-      <AdditionalDependencies>;shell32.lib;user32.lib;advapi32.lib;gdi32.lib;comdlg32.lib;ole32.lib;winmm.lib</AdditionalDependencies>
+      <AdditionalDependencies>shell32.lib;user32.lib;advapi32.lib;gdi32.lib;comdlg32.lib;ole32.lib;winmm.lib</AdditionalDependencies>
       <ShowProgress>NotSet</ShowProgress>
       <OutputFile>$(OutDir)\client.dll</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
-      <AdditionalLibraryDirectories>..\..\lib\common\x64\2015\release;..\..\lib\public\x64</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>..\..\lib\common\x64\2015\release;..\..\lib\public\x64;$(DXSDK_DIR)Lib\x86;C:\pukimod reborn\src\lib</AdditionalLibraryDirectories>
       <IgnoreSpecificDefaultLibraries>libc;libcd;libcmtd;libcpmtd;libcpmtd0;libcpmtd1</IgnoreSpecificDefaultLibraries>
       <GenerateDebugInformation>DebugFull</GenerateDebugInformation>
       <ProgramDatabaseFile>$(IntDir)/$(TargetName).pdb</ProgramDatabaseFile>
@@ -492,6 +493,7 @@ exit 1
     <ClInclude Include="..\shared\hintsystem.h" />
     <ClInclude Include="history_resource.h" />
     <ClInclude Include="hltvcamera.h" />
+    <ClInclude Include="html_mainmenu.h" />
     <ClInclude Include="hud.h" />
     <ClInclude Include="hud_basechat.h" />
     <ClInclude Include="hud_basetimer.h" />
@@ -500,10 +502,12 @@ exit 1
     <ClInclude Include="hud_closecaption.h" />
     <ClInclude Include="hud_crosshair.h" />
     <ClInclude Include="hud_element_helper.h" />
+    <ClInclude Include="hud_healthbar.h" />
     <ClInclude Include="hud_lcd.h" />
     <ClInclude Include="hud_macros.h" />
     <ClInclude Include="hud_numericdisplay.h" />
     <ClInclude Include="hud_pdump.h" />
+    <ClInclude Include="hud_suitpowerbar.h" />
     <ClInclude Include="hud_vehicle.h" />
     <ClInclude Include="hudelement.h" />
     <ClInclude Include="hudtexturehandle.h" />
@@ -535,6 +539,7 @@ exit 1
     <ClInclude Include="kbutton.h" />
     <ClInclude Include="..\..\common\language.h" />
     <ClInclude Include="lerp_functions.h" />
+    <ClInclude Include="lua_vguipanel.h" />
     <ClInclude Include="menu.h" />
     <ClInclude Include="movehelper_client.h" />
     <ClInclude Include="mumble.h" />
@@ -579,6 +584,7 @@ exit 1
     <ClInclude Include="text_message.h" />
     <ClInclude Include="timedevent.h" />
     <ClInclude Include="toggletextureproxy.h" />
+    <ClInclude Include="vgui_addonslist.h" />
     <ClInclude Include="vgui_basepanel.h" />
     <ClInclude Include="vgui_bitmapbutton.h" />
     <ClInclude Include="vgui_bitmapimage.h" />
@@ -589,12 +595,13 @@ exit 1
     <ClInclude Include="vgui_helpers.h" />
     <ClInclude Include="vgui_imagehealthpanel.h" />
     <ClInclude Include="vgui_int.h" />
+    <ClInclude Include="vgui_modelicon.h" />
     <ClInclude Include="vgui_schemevisualizer.h" />
     <ClInclude Include="vgui_spawnmenu.h" />
+    <ClInclude Include="vgui_thankspanel.h" />
     <ClInclude Include="vgui_video.h" />
     <ClInclude Include="vgui_video_player.h" />
     <ClInclude Include="vguicenterprint.h" />
-    <ClInclude Include="vgui_webbrowser.h" />
     <ClInclude Include="view.h" />
     <ClInclude Include="view_scene.h" />
     <ClInclude Include="viewangleanim.h" />
@@ -894,6 +901,10 @@ exit 1
     <ClCompile Include="..\shared\weapon_lua.cpp" />
     <ClCompile Include="c_npc_barney_ball.cpp" />
     <ClCompile Include="hl2\c_weapon_gravitygun.cpp" />
+    <ClCompile Include="html_mainmenu.cpp" />
+    <ClCompile Include="hud_healthbar.cpp" />
+    <ClCompile Include="hud_suitpowerbar.cpp" />
+    <ClCompile Include="lua_vguipanel.cpp" />
     <ClCompile Include="mp3player.cpp" />
     <ClCompile Include="replay\cdll_replay.cpp" />
     <ClCompile Include="replay\replaycamera.cpp" />
@@ -1319,14 +1330,16 @@ exit 1
     <ClCompile Include="vgui_grid.cpp" />
     <ClCompile Include="vgui_int.cpp" />
     <ClCompile Include="vgui_loadingdiscpanel.cpp" />
+    <ClCompile Include="vgui_addonslist.cpp" />
     <ClCompile Include="vgui_messagechars.cpp" />
+    <ClCompile Include="vgui_modelicon.cpp" />
     <ClCompile Include="vgui_netgraphpanel.cpp" />
     <ClCompile Include="vgui_schemevisualizer.cpp" />
     <ClCompile Include="vgui_slideshow_display_screen.cpp" />
     <ClCompile Include="vgui_spawnmenu.cpp" />
+    <ClCompile Include="vgui_thankspanel.cpp" />
     <ClCompile Include="vgui_video.cpp" />
     <ClCompile Include="vgui_video_player.cpp" />
-    <ClCompile Include="vgui_webbrowser.cpp" />
     <ClCompile Include="view.cpp" />
     <ClCompile Include="view_beams.cpp" />
     <ClCompile Include="view_effects.cpp" />

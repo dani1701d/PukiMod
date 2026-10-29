@@ -136,6 +136,9 @@
 #include "haptics/haptic_utils.h"
 #include "haptics/haptic_msgs.h"
 
+#include "luamanager.h"
+#include <vgui/VGUI.h>
+
 #if defined( TF_CLIENT_DLL )
 #include "tf_gc_client.h"
 #include "abuse_report.h"
@@ -2338,6 +2341,8 @@ void CHLClient::FrameStageNotify( ClientFrameStage_t curStage )
 		break;
 	case FRAME_START:
 		{
+			LuaManager()->Think();
+
 			// Mark the frame as open for client fx additions
 			SetFXCreationAllowed( true );
 			SetBeamCreationAllowed( true );

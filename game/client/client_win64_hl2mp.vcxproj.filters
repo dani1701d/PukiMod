@@ -1964,7 +1964,25 @@
     <ClInclude Include="..\shared\weapon_lua.h">
       <Filter>Source Files\HL2MP\Weapons</Filter>
     </ClInclude>
-    <ClInclude Include="vgui_webbrowser.h">
+    <ClInclude Include="hud_healthbar.h">
+      <Filter>Source Files\HL2 DLL</Filter>
+    </ClInclude>
+    <ClInclude Include="hud_suitpowerbar.h">
+      <Filter>Source Files\HL2 DLL</Filter>
+    </ClInclude>
+    <ClInclude Include="lua_vguipanel.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vgui_modelicon.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vgui_addonslist.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vgui_thankspanel.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="html_mainmenu.h">
       <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -3559,11 +3577,28 @@
     <ClCompile Include="..\shared\weapon_lua.cpp">
       <Filter>Source Files\HL2MP\Weapons</Filter>
     </ClCompile>
-    <ClCompile Include="vgui_webbrowser.cpp">
+    <ClCompile Include="hud_healthbar.cpp">
+      <Filter>Source Files\HL2 DLL</Filter>
+    </ClCompile>
+    <ClCompile Include="hud_suitpowerbar.cpp">
+      <Filter>Source Files\HL2 DLL</Filter>
+    </ClCompile>
+    <ClCompile Include="lua_vguipanel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vgui_modelicon.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vgui_addonslist.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vgui_thankspanel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="html_mainmenu.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
-  <ItemGroup />
   <ItemGroup />
   <ItemGroup>
     <None Include="..\..\game\client\client_base.vpc">

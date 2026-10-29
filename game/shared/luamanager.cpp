@@ -1,11 +1,14 @@
 #include "cbase.h"
-#include "luamanager.h"
+#include "engine/IEngineSound.h"
 #include "filesystem.h"
 #include "interface.h"
-#include "engine/IEngineSound.h"
+#include "luamanager.h"
 #include "materialsystem/imaterialsystem.h"
 #include "materialsystem/imaterialsystemhardwareconfig.h"
 #include "weapon_lua.h"
+#include <windows.h>
+#include <iostream>
+#include <string>
 
 #ifndef CLIENT_DLL
 #include "networkstringtable_gamedll.h"
@@ -14,16 +17,32 @@
 
 #ifdef CLIENT_DLL
 #include "networkstringtable_clientdll.h"
+#include "lua_vguipanel.h"
+#include "iclientmode.h"
 #endif
 
 #include "igamesystem.h"
 #include <string>
 
+#ifdef CLIENT_DLL
+#include "usermessages.h"
+#include "inetchannelinfo.h"   // <- добавить
+#else
+#include "recipientfilter.h"
+#endif
+#include "utlbuffer.h"
+
 // Уникальное имя нашей метаблицы для проверки типов в Lua
 #define PLAYER_META "SourcePlayer"
 #define ENTITY_META "Entity"
+#define PANEL_META  "VGUIPanel"
+#define CLIENTPLAYER_META "ClientPlayer"
 
 CLuaManager* g_pLuaManager = nullptr;
+
+// ========================================== Ардуино ==========================================
+// Дескриптор последовательного порта
+static HANDLE hSerial = INVALID_HANDLE_VALUE;
 
 // ========================================== Глобальный код ==========================================
 
@@ -65,75 +84,532 @@ int Lua_ServerCommand(lua_State* L)
 }
 #endif
 
+#ifdef CLIENT_DLL
+#include "iinput.h"
+
+int Lua_RunConsoleCommand(lua_State* L)
+{
+    const char* cmd = luaL_checkstring(L, 1);
+    engine->ClientCmd_Unrestricted(cmd);
+    return 0;
+}
+
+int Lua_ServerCmd(lua_State* L)
+{
+    char buf[512];
+    int n = lua_gettop(L);
+
+    V_strncpy(buf, luaL_checkstring(L, 1), sizeof(buf));
+    for (int i = 2; i <= n; i++)
+    {
+        V_strncat(buf, " ", sizeof(buf)); //V_strncat(buf, " \"", sizeof(buf)); 
+        V_strncat(buf, luaL_checkstring(L, i), sizeof(buf));
+        //V_strncat(buf, "\"", sizeof(buf)); // хз может эта фигня нужна, но для аргумента в виде строки мешает
+    }
+
+    engine->ServerCmd(buf);   // выполнится на сервере от имени этого игрока
+    return 0;
+}
+
+int Lua_IsKeyDown(lua_State* L)
+{
+    int key = luaL_checknumber(L, 1);
+
+    C_BasePlayer* pLocalPlayer = C_BasePlayer::GetLocalPlayer();
+    if (pLocalPlayer)
+    {
+        // Получаем маску текущих нажатых кнопок
+        int buttons = pLocalPlayer->m_nButtons;
+
+        if (buttons & key)
+        {
+            lua_pushboolean(L, 1);
+            return 1;
+        }
+        else 
+        {
+            lua_pushboolean(L, 0);
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+int Lua_IsKeyPressed(lua_State* L)
+{
+    int key = luaL_checknumber(L, 1);
+
+    C_BasePlayer* pLocalPlayer = C_BasePlayer::GetLocalPlayer();
+    if (pLocalPlayer)
+    {
+        // Получаем маску текущих нажатых кнопок
+        int buttons = pLocalPlayer->m_nButtons;
+        double m_flLastPressTime = 0.0;
+
+        if (buttons & key)
+        {
+            double flCurrentTime = Plat_FloatTime(); // Получаем текущее время в секундах
+
+            if (flCurrentTime - m_flLastPressTime >= 1)
+            {
+                lua_pushboolean(L, 1);
+                return 1;
+            }
+        }
+        else
+        {
+            lua_pushboolean(L, 0);
+            return 1;
+        }
+    }
+
+    return 0;
+}
+#endif
+
 int LuaWeapon_GetClassname(lua_State* L)
 {
     CBaseEntity* pEnt = *(CBaseEntity**)luaL_checkudata(L, 1, "Entity");
     CWeaponLua* pWeapon = dynamic_cast<CWeaponLua*>(pEnt);
     if (pWeapon) {
-        pWeapon->GetClassname();
+        lua_pushstring(L, pWeapon->GetClassname());
         return 1;
     }
     return 0;
 }
 
-#ifndef CLIENT_DLL
-// Регистрируем кастомное имя оружия в фабрике Source Engine
-int Lua_RegisterWeapon(lua_State* L)
+#ifdef CLIENT_DLL
+#include <vgui_controls/Controls.h>
+#include <vgui_controls/Button.h>
+#include <vgui_controls/Label.h>
+#include <vgui_controls/ImagePanel.h>
+#include <vgui_controls/TextEntry.h>
+#include <vgui/ILocalize.h>
+
+// Вспомогательная функция проталкивания панели в Lua
+static void PushPanelObject(lua_State* L, vgui::Panel* pPanel)
 {
-    const char* pszCustomName = luaL_checkstring(L, 1);
-    if (!pszCustomName) return 0;
-
-    IEntityFactoryDictionary* pDict = EntityFactoryDictionary();
-    if (pDict)
+    if (!pPanel)
     {
-        IEntityFactory* pBaseFactory = pDict->FindFactory("weapon_lua");
-        if (pBaseFactory && !pDict->FindFactory(pszCustomName))
-        {
-            // 1. Регистрируем имя в фабрике энтити
-            pDict->InstallFactory( pBaseFactory, pszCustomName );
-            
-            LookupWeaponInfoSlot(pszCustomName);
+        lua_pushnil(L);
+        return;
+    }
+    LuaPanel_t* pLuaPanel = (LuaPanel_t*)lua_newuserdata(L, sizeof(LuaPanel_t));
+    Construct(pLuaPanel);
+    pLuaPanel->hPanel.Set(pPanel);
 
-            Msg("Lua Weapon Registered & Precached: %s\n", pszCustomName);
+    luaL_getmetatable(L, PANEL_META);
+    lua_setmetatable(L, -2);
+}
+
+static vgui::Panel* GetPanelFromLua(lua_State* L, int index)
+{
+    LuaPanel_t* pLuaPanel = (LuaPanel_t*)luaL_checkudata(L, index, PANEL_META);
+    return pLuaPanel ? pLuaPanel->hPanel.Get() : nullptr;
+}
+
+// vgui.CreateFrame(title)
+int Lua_VGUI_CreateFrame(lua_State* L)
+{
+    const char* title = luaL_optstring(L, 1, "Window");
+
+    // Создаем окно с родителем g_pClientMode->GetViewport() или NULL
+    CLuaFrame* pFrame = new CLuaFrame(g_pClientMode ? g_pClientMode->GetViewport() : nullptr, "LuaFrame");
+    pFrame->SetTitle(title, true);
+    pFrame->SetScheme("ClientScheme");
+    pFrame->SetMoveable(true);
+    pFrame->SetSizeable(true);
+    pFrame->SetMenuButtonVisible(false);
+    pFrame->SetSize(400, 300);
+    pFrame->SetVisible(true);
+    pFrame->Activate(); // Показывает окно и перехватывает ввод фокуса
+
+    PushPanelObject(L, pFrame);
+    return 1;
+}
+
+// panel:SetSize(w, h)
+int LuaPanel_SetSize(lua_State* L)
+{
+    vgui::Panel* pPanel = GetPanelFromLua(L, 1);
+    int w = luaL_checkinteger(L, 2);
+    int h = luaL_checkinteger(L, 3);
+
+    if (pPanel)
+        pPanel->SetSize(w, h);
+
+    return 0;
+}
+
+// panel:SetPos(x, y)
+int LuaPanel_SetPos(lua_State* L)
+{
+    vgui::Panel* pPanel = GetPanelFromLua(L, 1);
+    int x = luaL_checkinteger(L, 2);
+    int y = luaL_checkinteger(L, 3);
+
+    if (pPanel)
+        pPanel->SetPos(x, y);
+
+    return 0;
+}
+
+// panel:AddButton(text, x, y, w, h, onClickCallback)
+int LuaPanel_AddButton(lua_State* L)
+{
+    vgui::Panel* pParent = GetPanelFromLua(L, 1);
+    const char* text = luaL_checkstring(L, 2);
+    int x = luaL_checkinteger(L, 3);
+    int y = luaL_checkinteger(L, 4);
+    int w = luaL_checkinteger(L, 5);
+    int h = luaL_checkinteger(L, 6);
+
+    if (!pParent) return 0;
+
+    CLuaFrame* pFrame = dynamic_cast<CLuaFrame*>(pParent);
+    if (!pFrame) return 0;
+
+    vgui::Button* pBtn = new vgui::Button(pFrame, "LuaButton", text);
+    pBtn->AddActionSignalTarget(pFrame);
+    pFrame->AddLuaChild(pBtn, x, y, w, h);
+    
+    // Если 7-й аргумент — функция, сохраняем ее в реестре Lua
+    if (lua_isfunction(L, 7))
+    {
+        lua_pushvalue(L, 7);
+        int ref = luaL_ref(L, LUA_REGISTRYINDEX);
+
+        static int g_cmdID = 0;
+        char cmdBuf[32];
+        Q_snprintf(cmdBuf, sizeof(cmdBuf), "luabtn_%d", g_cmdID++);
+
+        pBtn->SetCommand(cmdBuf);
+        pFrame->RegisterButtonCallback(cmdBuf, ref);
+    }
+
+    PushPanelObject(L, pBtn);
+    return 1;
+}
+
+// panel:AddImage(path, x, y, w, h)
+int LuaPanel_AddImage(lua_State* L)
+{
+    vgui::Panel* pParent = GetPanelFromLua(L, 1);
+    const char* path = luaL_checkstring(L, 2);
+    int x = luaL_checkinteger(L, 3);
+    int y = luaL_checkinteger(L, 4);
+    int w = luaL_checkinteger(L, 5);
+    int h = luaL_checkinteger(L, 6);
+
+    if (!pParent) return 0;
+
+    CLuaFrame* pFrame = dynamic_cast<CLuaFrame*>(pParent);
+    if (!pFrame) return 0;
+
+    vgui::ImagePanel* pImg = new vgui::ImagePanel(pFrame, "LuaImagePanel");
+    pImg->SetImage(path);
+    pImg->SetShouldScaleImage(true);
+    pFrame->AddLuaChild(pImg, x, y, w, h);
+
+    PushPanelObject(L, pImg);
+    return 1;
+}
+
+// panel:AddTextEntry(x, y, w, h)
+int LuaPanel_AddTextEntry(lua_State* L)
+{
+    vgui::Panel* pParent = GetPanelFromLua(L, 1);
+    int x = luaL_checkinteger(L, 2);
+    int y = luaL_checkinteger(L, 3);
+    int w = luaL_checkinteger(L, 4);
+    int h = luaL_checkinteger(L, 5);
+
+    if (!pParent) return 0;
+
+    CLuaFrame* pFrame = dynamic_cast<CLuaFrame*>(pParent);
+    if (!pFrame) return 0;
+
+    vgui::TextEntry* pTextEntry = new vgui::TextEntry(pFrame, "LuaTextEntry");
+    pFrame->AddLuaChild(pTextEntry, x, y, w, h);
+
+    PushPanelObject(L, pTextEntry);
+    return 1;
+}
+
+// panel:GetTextEntry(1)
+int LuaPanel_GetTextEntry(lua_State* L)
+{
+    vgui::Panel* pParent = GetPanelFromLua(L, 1);
+    int index = luaL_checkinteger(L, 2);
+
+    if (!pParent) return 0;
+
+    CLuaFrame* pFrame = dynamic_cast<CLuaFrame*>(pParent);
+    if (!pFrame) return 0;
+
+    CUtlVector<vgui::TextEntry*> m_TextEntries;
+
+    for (int i = 0; i < pFrame->GetChildCount(); i++)
+    {
+        vgui::Panel* pChild = pFrame->GetChild(i);
+
+        // Проверяем, совпадает ли имя
+        if (pChild && Q_strcmp(pChild->GetName(), "LuaTextEntry") == 0)
+        {
+            // Пытаемся привести к типу TextEntry
+            vgui::TextEntry* pEntry = dynamic_cast<vgui::TextEntry*>(pChild);
+            if (pEntry)
+            {
+                m_TextEntries.AddToTail(pEntry);
+            }
+        }
+    }
+
+    char buffer[256];
+
+    if (m_TextEntries.Count() > 0)
+    {
+        m_TextEntries[index]->GetText(buffer, sizeof(buffer));
+        if (buffer[0] != '\0')
+        {
+            lua_pushstring(L, buffer);
+            return 1;
+        }
+    }
+
+    lua_pushnil(L);
+    return 0;
+}
+
+// panel:Close()
+int LuaPanel_Close(lua_State* L)
+{
+    vgui::Panel* pPanel = GetPanelFromLua(L, 1);
+    if (pPanel)
+    {
+        pPanel->MarkForDeletion(); // Безопасное удаление панели VGUI
+    }
+    return 0;
+}
+
+// panel:MakePopup()
+int LuaPanel_MakePopup(lua_State* L)
+{
+    vgui::Panel* pPanel = GetPanelFromLua(L, 1);
+    if (pPanel)
+    {
+        pPanel->MakePopup();
+        pPanel->SetMouseInputEnabled(true);
+        pPanel->SetKeyBoardInputEnabled(true);
+    }
+    return 0;
+}
+
+// cl_player:GetHealth()
+int LuaClientPlayer_GetHealth(lua_State* L)
+{
+    C_BasePlayer* pPlayer = C_BasePlayer::GetLocalPlayer();
+
+    if (pPlayer)
+    {
+        lua_pushnumber(L, pPlayer->GetHealth());
+        return 1;
+    }
+
+    return 0;
+}
+
+// cl_player:GetVelocity()
+int LuaClientPlayer_GetVelocity(lua_State* L)
+{
+    C_BasePlayer* pPlayer = C_BasePlayer::GetLocalPlayer();
+
+    if (pPlayer)
+    {
+        lua_pushnumber(L, pPlayer->GetAbsVelocity().Length2D());
+        return 1;
+    }
+
+    return 0;
+}
+
+// cl_player:GetCurrentItem()
+int LuaClientPlayer_GetCurrentItem(lua_State* L)
+{
+    C_BasePlayer* pPlayer = C_BasePlayer::GetLocalPlayer();
+
+    if (pPlayer)
+    {
+        CBaseCombatWeapon* pWeapon = pPlayer->GetActiveWeapon();
+        if (pWeapon)
+        {
+            lua_pushstring(L, pWeapon->GetClassname());
+            return 1;
         }
     }
     return 0;
+}
+
+static CUtlVector<vgui::PHandle> s_HudLabels;
+
+// vgui.CreateLabel(text, x, y)
+int Lua_VGUI_CreateLabel(lua_State* L)
+{
+    const char* text = luaL_optstring(L, 1, "");
+    int x = (int)luaL_optnumber(L, 2, 0);
+    int y = (int)luaL_optnumber(L, 3, 0);
+
+    vgui::Panel* pParent = g_pClientMode ? g_pClientMode->GetViewport() : nullptr;
+    vgui::Label* pLabel = new vgui::Label(pParent, "LuaHudLabel", text);
+
+    pLabel->SetScheme("ClientScheme");
+    pLabel->SetMouseInputEnabled(false);       // клики проходят сквозь текст
+    pLabel->SetKeyBoardInputEnabled(false);    // клавиатура не перехватывается
+    pLabel->SetPaintBackgroundEnabled(false);
+    pLabel->SetContentAlignment(vgui::Label::a_west);
+    pLabel->SetFgColor(Color(255, 255, 255, 255));
+    pLabel->SetPos(x, y);
+    pLabel->SetVisible(true);
+    pLabel->SizeToContents();
+
+    vgui::PHandle h;
+    h.Set(pLabel);
+    s_HudLabels.AddToTail(h);
+
+    PushPanelObject(L, pLabel);
+    return 1;
+}
+
+// Удаляет все метки (вызывается при смене карты)
+void LuaHud_RemoveAll()
+{
+    FOR_EACH_VEC(s_HudLabels, i)
+    {
+        vgui::Panel* p = s_HudLabels[i].Get();
+        if (p)
+            p->MarkForDeletion();
+    }
+    s_HudLabels.Purge();
+}
+
+// label:SetText(text)
+int LuaPanel_SetText(lua_State* L)
+{
+    vgui::Panel* pPanel = GetPanelFromLua(L, 1);
+    const char* text = luaL_checkstring(L, 2);
+
+    vgui::Label* pLabel = dynamic_cast<vgui::Label*>(pPanel);
+    if (pLabel)
+    {
+        pLabel->SetText(text);
+        if (!dynamic_cast<vgui::Button*>(pPanel))   // кнопки (они тоже Label) не растягиваем
+            pLabel->SizeToContents();
+    }
+    return 0;
+}
+
+// label:SetText(text)
+int LuaPanel_GetText(lua_State* L)
+{
+    vgui::Panel* pPanel = GetPanelFromLua(L, 1);
+
+    vgui::Label* pLabel = dynamic_cast<vgui::Label*>(pPanel);
+    if (pLabel)
+    {
+        wchar_t szBuffer[256];
+        pLabel->GetText(szBuffer, sizeof(szBuffer));
+
+        char szText[256];
+        vgui::ILocalize::ConvertUnicodeToANSI(szBuffer, szText, sizeof(szText));
+
+        lua_pushstring(L, szText);
+        return 1;
+    }
+    return 0;
+}
+
+// label:SetColor(r, g, b [, a])
+int LuaPanel_SetColor(lua_State* L)
+{
+    vgui::Panel* pPanel = GetPanelFromLua(L, 1);
+    int r = clamp((int)luaL_checknumber(L, 2), 0, 255);
+    int g = clamp((int)luaL_checknumber(L, 3), 0, 255);
+    int b = clamp((int)luaL_checknumber(L, 4), 0, 255);
+    int a = clamp((int)luaL_optnumber(L, 5, 255), 0, 255);
+
+    if (pPanel)
+        pPanel->SetFgColor(Color(r, g, b, a));
+    return 0;
+}
+
+// label:SetFont("Default")  -- имя шрифта из ClientScheme.res
+int LuaPanel_SetFont(lua_State* L)
+{
+    vgui::Panel* pPanel = GetPanelFromLua(L, 1);
+    const char* name = luaL_checkstring(L, 2);
+
+    vgui::Label* pLabel = dynamic_cast<vgui::Label*>(pPanel);
+    if (pLabel)
+    {
+        vgui::IScheme* pScheme = vgui::scheme()->GetIScheme(vgui::scheme()->GetScheme("ClientScheme"));
+        vgui::HFont font = pScheme ? pScheme->GetFont(name, true) : 0;
+        if (font != 0)
+        {
+            pLabel->SetFont(font);
+            if (!dynamic_cast<vgui::Button*>(pPanel))
+                pLabel->SizeToContents();
+        }
+        else
+        {
+            Warning("[Lua] unknown font '%s'\n", name);
+        }
+    }
+    return 0;
+}
+
+// panel:SetVisible(bool)
+int LuaPanel_SetVisible(lua_State* L)
+{
+    vgui::Panel* pPanel = GetPanelFromLua(L, 1);
+    if (pPanel)
+        pPanel->SetVisible(lua_toboolean(L, 2) != 0);
+    return 0;
+}
+
+// GetScreenSize() -> width, height
+int Lua_GetScreenSize(lua_State* L)
+{
+    int w, h;
+    engine->GetScreenSize(w, h);
+    lua_pushnumber(L, w);
+    lua_pushnumber(L, h);
+    return 2;
+}
+
+// Вызов глобальной Lua-функции без аргументов (для покадровых хуков)
+void Lua_CallGlobal(lua_State* L, const char* name)
+{
+    lua_getglobal(L, name);
+    if (!lua_isfunction(L, -1))
+    {
+        lua_pop(L, 1);
+        return;
+    }
+
+    if (lua_pcall(L, 0, 0, 0) != 0)
+    {
+        // не чаще раза в 2 секунды, чтобы не забить консоль
+        static double s_flNextWarn = 0.0;
+        if (Plat_FloatTime() >= s_flNextWarn)
+        {
+            Warning("[Lua] error in %s: %s\n", name, lua_tostring(L, -1));
+            s_flNextWarn = Plat_FloatTime() + 2.0;
+        }
+        lua_pop(L, 1);
+    }
 }
 #endif
-
-// Функция для выстрела стандартными пулями Source Engine
-int LuaWeapon_ShootBullets(lua_State* L) {
-    // Первым делом достаем энтити оружия из метатаблицы "Entity"
-    CBaseEntity* pEnt = *(CBaseEntity**)luaL_checkudata(L, 1, "Entity");
-    int iDamage = luaL_checkinteger(L, 2);   // Урон
-    int iShots = luaL_checkinteger(L, 3);    // Количество пуль (дробь)
-    float flCone = luaL_checknumber(L, 4);   // Разброс (например, 0.02f)
-
-    CWeaponLua* pWeapon = dynamic_cast<CWeaponLua*>(pEnt);
-    if (pWeapon) {
-        CBasePlayer* pOwner = ToBasePlayer(pWeapon->GetOwner());
-        if (pOwner) {
-            // Играем стандартный звук выстрела пушки
-            pWeapon->WeaponSound(SINGLE);
-
-            // Стреляем через стандартную структуру движка
-            FireBulletsInfo_t info;
-            info.m_iShots = iShots;
-            info.m_vecSrc = pOwner->Weapon_ShootPosition();
-            info.m_vecDirShooting = pOwner->GetAutoaimVector(AUTOAIM_SCALE_DEFAULT);
-            info.m_vecSpread = Vector(flCone, flCone, flCone);
-            info.m_flDistance = MAX_COORD_RANGE;
-            info.m_iAmmoType = pWeapon->GetPrimaryAmmoType();
-            info.m_flDamage = (float)iDamage;
-
-            pOwner->FireBullets(info);
-
-            // Добавляем визуальную отдачу игроку
-            pOwner->ViewPunch(QAngle(random->RandomFloat(-2, -1), random->RandomFloat(-1, 1), 0));
-        }
-    }
-    return 0;
-}
 
 // Функция-помощник для создания и передачи энтити в Lua
 void Lua_PushEntity(lua_State* L, CBaseEntity* pEntity) {
@@ -220,7 +696,7 @@ int Lua_Warning(lua_State* L)
     if (lua_isstring(L, 1))
     {
         const char* text = lua_tostring(L, 1); // Получаем строку из стека Lua
-        Warning("%s", text);                       // Выводим в стандартную консоль Source
+        Warning("%s", text);                   // Выводим в стандартную консоль Source
     }
     return 0; // Возвращаем 0, так как функция ничего не возвращает обратно в Lua
 }
@@ -231,9 +707,82 @@ int Lua_Error(lua_State* L)
     if (lua_isstring(L, 1))
     {
         const char* text = lua_tostring(L, 1); // Получаем строку из стека Lua
-        Error("%s", text);                       // Выводим в стандартную консоль Source
+        Error("%s", text);                     // Крашим игру
     }
     return 0; // Возвращаем 0, так как функция ничего не возвращает обратно в Lua
+}
+
+int Lua_InitSerialPort(lua_State* L)
+{
+    const char* portName = luaL_checkstring(L, 1); // COM3, COM4 и т.д.
+    DWORD baudRate = luaL_checkinteger(L, 2); // 9600
+
+    hSerial = CreateFileA(
+        portName,
+        GENERIC_WRITE,
+        0,
+        NULL,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+
+    if (hSerial == INVALID_HANDLE_VALUE) {
+        Warning("Serial: Failed to open %s\n", portName);
+        return 0;
+    }
+
+    DCB dcbSerialParams = { 0 };
+    dcbSerialParams.DCBlength = sizeof(dcbSerialParams);
+
+    if (!GetCommState(hSerial, &dcbSerialParams)) {
+        CloseHandle(hSerial);
+        return 0;
+    }
+
+    dcbSerialParams.BaudRate = baudRate;
+    dcbSerialParams.ByteSize = 8;
+    dcbSerialParams.StopBits = ONESTOPBIT;
+    dcbSerialParams.Parity = NOPARITY;
+
+    if (!SetCommState(hSerial, &dcbSerialParams)) {
+        CloseHandle(hSerial);
+        return 0;
+    }
+
+    // Настройка тайм-аутов записи
+    COMMTIMEOUTS timeouts = { 0 };
+    timeouts.WriteTotalTimeoutConstant = 50;
+    SetCommTimeouts(hSerial, &timeouts);
+
+    Msg("Serial: Connected successfully to %s\n", portName);
+    return 0;
+}
+
+int Lua_SendToArduino(lua_State* L)
+{
+    const char* text = luaL_checkstring(L, 1);
+
+    if (hSerial != INVALID_HANDLE_VALUE)
+    {
+        // Формируем строку формата "H:100|V:30\n"
+        std::string data = text;
+
+        DWORD bytesWritten;
+        WriteFile(hSerial, data.c_str(), (DWORD)data.length(), &bytesWritten, NULL);
+    }
+
+    return 0;
+}
+
+int Lua_CloseSerialPort(lua_State* L)
+{
+    if (hSerial != INVALID_HANDLE_VALUE) {
+        CloseHandle(hSerial);
+        hSerial = INVALID_HANDLE_VALUE;
+    }
+
+    return 0;
 }
 
 // Наш C++ коллбэк, который будет вызываться движком при вводе команды
@@ -273,10 +822,21 @@ int Lua_RegisterConCommand(lua_State* L)
     if (lua_isstring(L, 1))
     {
         const char* cmdName = lua_tostring(L, 1);
+        const char* safeCmdName = strdup(cmdName); // Выделяем память под имя команды
 
-        // Создаем официальную команду движка Source Engine
-        // Используем макрос и выделяем память под имя команды
-        new ConCommand(strdup(cmdName), LuaCommandCallback, "Custom Lua Command");
+#ifdef CLIENT_DLL
+        // Для КЛИЕНТА: обязательно передаем флаг FCVAR_CLIENTDLL
+        ConCommand* pCmd = new ConCommand(safeCmdName, LuaCommandCallback, "Custom Client Lua Command", FCVAR_CLIENTDLL);
+#else
+        // Для СЕРВЕРА: обычная регистрация
+        ConCommand* pCmd = new ConCommand(safeCmdName, LuaCommandCallback, "Custom Server Lua Command", FCVAR_GAMEDLL);
+#endif
+
+        // Принудительно связываем с системой cvar
+        if (cvar)
+        {
+            cvar->RegisterConCommand(pCmd);
+        }
     }
     return 0;
 }
@@ -585,6 +1145,32 @@ int Lua_GetLocalPlayer(lua_State* L)
     return 1; // Возвращаем 1 объект игрока в Lua
 }
 
+// GetPlayers() -> таблица всех подключённых игроков
+int Lua_GetPlayers(lua_State* L)
+{
+    lua_newtable(L);
+    int idx = 1;
+    for (int i = 1; i <= gpGlobals->maxClients; i++)
+    {
+        CBasePlayer* pPlayer = UTIL_PlayerByIndex(i);
+        if (pPlayer && pPlayer->IsConnected())
+        {
+            PushPlayerObject(L, pPlayer);
+            lua_rawseti(L, -2, idx++);
+        }
+    }
+    return 1;
+}
+
+// GetCommandPlayer() -> игрок, вызвавший текущую команду (внутри функции RegisterCommand)
+int Lua_GetCommandPlayer(lua_State* L)
+{
+    CBasePlayer* pPlayer = UTIL_GetCommandClient();
+    if (!pPlayer) { lua_pushnil(L); return 1; }
+    PushPlayerObject(L, pPlayer);
+    return 1;
+}
+
 // Функция нанесения урона или убийства всех игроков (для примера взаимодействия с миром)
 // Использование в Lua: KillAllPlayers()
 int Lua_KillAllPlayers(lua_State* L)
@@ -601,7 +1187,38 @@ int Lua_KillAllPlayers(lua_State* L)
     return 0;
 }
 
+int Lua_ShowTitle(lua_State* L)
+{
+    const char* text = luaL_checkstring(L, 1);
+    int duration = luaL_checknumber(L, 2);
 
+    for (int i = 1; i <= gpGlobals->maxClients; i++)
+    {
+        CBasePlayer* pPlayer = UTIL_PlayerByIndex(i);
+        if (pPlayer)
+        {
+            hudtextparms_t params;
+            params.x = -1.0; // Центр по горизонтали
+            params.y = 0.4;  // Чуть выше центра по вертикали (чтобы не мешать прицелу)
+            params.a1 = 255; // Альфа-канал (прозрачность)
+            params.r1 = 255; params.g1 = 255; params.b1 = 255; // Белый цвет
+            params.fadeinTime = 0.1;
+            params.fadeoutTime = 0.1;
+            params.holdTime = duration; // Сколько секунд держать текст
+
+            UTIL_HudMessage(pPlayer, params, text);
+        }
+    }
+    return 0;
+}
+
+int Lua_GetMapName(lua_State* L)
+{
+    const char* pMapName = STRING(gpGlobals->mapname);
+
+    lua_pushstring(L, pMapName);
+    return 1;
+}
 
 // Метод: player:GiveItem("weapon_357")
 int LuaPlayer_GiveItem(lua_State* L)
@@ -616,6 +1233,23 @@ int LuaPlayer_GiveItem(lua_State* L)
     return 0;
 }
 
+// Метод: player:GetCurrentItem()
+int LuaPlayer_GetCurrentItem(lua_State* L)
+{
+    CBasePlayer* pPlayer = GetPlayerFromLua(L, 1);
+
+    if (pPlayer)
+    {
+        CBaseCombatWeapon* pWeapon = pPlayer->GetActiveWeapon();
+        if (pWeapon)
+        {
+            lua_pushstring(L, pWeapon->GetClassname());
+            return 1;
+        }
+    }
+    return 0;
+}
+
 // Метод: player:Kill()
 int LuaPlayer_Kill(lua_State* L)
 {
@@ -624,6 +1258,61 @@ int LuaPlayer_Kill(lua_State* L)
     if (pPlayer)
     {
         pPlayer->CommitSuicide();
+    }
+    return 0;
+}
+
+// Метод: player:Ignite(3)
+int LuaPlayer_Ignite(lua_State* L)
+{
+    CBasePlayer* pPlayer = GetPlayerFromLua(L, 1);
+    float fireTime = (float)luaL_checknumber(L, 2); // время длительности огня в секундах
+
+    if (pPlayer)
+    {
+        pPlayer->Ignite(fireTime, false, 0.5f);
+    }
+    return 0;
+}
+
+// Метод: player:SetFOV(90)
+int LuaPlayer_SetFOV(lua_State* L)
+{
+    CBasePlayer* pPlayer = GetPlayerFromLua(L, 1);
+    float fov = (float)luaL_checknumber(L, 2); // поле зрения
+
+    if (pPlayer)
+    {
+        pPlayer->SetFOV(pPlayer, fov);
+    }
+    return 0;
+}
+
+int LuaPlayer_SetModel(lua_State* L)
+{
+    CBasePlayer* pPlayer = GetPlayerFromLua(L, 1);
+    const char* modelPath = luaL_checkstring(L, 2); // путь к модели
+
+    if (pPlayer)
+    {
+        CBaseEntity::PrecacheModel(modelPath);
+        pPlayer->SetModel(modelPath);
+        
+    }
+    return 0;
+}
+
+// Метод: player:SetColor(255, 0, 0)
+int LuaPlayer_SetColor(lua_State* L)
+{
+    CBasePlayer* pPlayer = GetPlayerFromLua(L, 1);
+    float r = (float)luaL_checknumber(L, 2); // красный
+    float g = (float)luaL_checknumber(L, 3); // зелёный
+    float b = (float)luaL_checknumber(L, 4); // синий
+
+    if (pPlayer)
+    {
+        pPlayer->SetRenderColor(r, g, b);
     }
     return 0;
 }
@@ -712,6 +1401,50 @@ int LuaPlayer_SetPos(lua_State* L)
     return 0;
 }
 
+// Метод: player:GetEyeVector(100)
+// Возвращает позицию конца луча взгляда игрока
+int LuaPlayer_GetEyeVector(lua_State* L)
+{
+    CBasePlayer* pPlayer = GetPlayerFromLua(L, 1);
+    int force = luaL_checknumber(L, 2);
+
+    if (pPlayer)
+    {
+        QAngle qAngles = pPlayer->EyeAngles();
+
+        // 2. Конвертируем углы в нормализованный вектор направления вперед
+        Vector vecForward;
+        AngleVectors(qAngles, &vecForward);
+
+        Vector vecImpulse = vecForward * force;
+        lua_pushnumber(L, vecImpulse.x);
+        lua_pushnumber(L, vecImpulse.y);
+        lua_pushnumber(L, vecImpulse.z);
+        return 3;
+    }
+
+    return 0;
+}
+
+// Метод: player:ApplyImpulse(x, y, z)
+// Применяет к игроку импульс силы
+int LuaPlayer_ApplyImpulse(lua_State* L)
+{
+    CBasePlayer* pPlayer = GetPlayerFromLua(L, 1);
+    int x = luaL_checknumber(L, 2);
+    int y = luaL_checknumber(L, 3);
+    int z = luaL_checknumber(L, 4);
+
+    Vector impulse = Vector(x, y, z);
+
+    if (pPlayer)
+    {
+        pPlayer->ApplyAbsVelocityImpulse(impulse);
+    }
+
+    return 0;
+}
+
 // Метод: player:SetGravity(0.5) -- 50% от обычной гравитации
 int LuaPlayer_SetGravity(lua_State* L)
 {
@@ -721,6 +1454,25 @@ int LuaPlayer_SetGravity(lua_State* L)
     if (pPlayer)
     {
         pPlayer->SetGravity(gravityScale); // Меняет гравитацию конкретно для этого игрока
+    }
+    return 0;
+}
+
+// Метод: player:IsKeyPressed(IN_JUMP)
+int LuaPlayer_IsKeyPressed(lua_State* L)
+{
+    CBasePlayer* pPlayer = GetPlayerFromLua(L, 1);
+    int key = luaL_checknumber(L, 2);
+
+    if (pPlayer && (pPlayer->m_nButtons & key))
+    {
+        lua_pushboolean(L, 1);
+        return 1;
+    }
+    else
+    {
+        lua_pushboolean(L, 0);
+        return 1;
     }
     return 0;
 }
@@ -808,8 +1560,26 @@ int LuaPlayer_ChatPrint(lua_State* L)
     return 0;
 }
 
+// Метод: player:ShowHint("Сообщение")
+// Использование в Lua: player:ShowHint("Welcome to the server!")
+int LuaPlayer_ShowHint(lua_State* L)
+{
+    CBasePlayer* pPlayer = GetPlayerFromLua(L, 1);
+    const char* message = luaL_checkstring(L, 2);
+
+    if (pPlayer)
+    {
+        UTIL_HudHintText(pPlayer, message);
+    }
+
+    return 0;
+}
 #endif
 
+
+// NOT USED: engine file download (downloadables) does not deliver .lua files.
+// Client scripts are sent through the "LuaFile" user message instead (see LuaSync below).
+#if 0
 void RegisterLuaFolder_R(INetworkStringTable* pTable, const char* pszCurrentPath)
 {
     char szSearchPath[MAX_PATH];
@@ -828,7 +1598,7 @@ void RegisterLuaFolder_R(INetworkStringTable* pTable, const char* pszCurrentPath
             Q_snprintf(szFullFilePath, sizeof(szFullFilePath), "%s/%s", pszCurrentPath, pFileName);
 
             // Добавляем файл в таблицу закачек движка
-            pTable->AddString(false, szFullFilePath);
+            pTable->AddString(true, szFullFilePath);
             Msg("[Lua-Server] Registered for download: %s\n", szFullFilePath);
         }
         pFileName = filesystem->FindNext(findHandle);
@@ -882,6 +1652,7 @@ void ForceDownloadServerAddons()
     // Запускаем рекурсивный обход с нашей корневой клиентской папки
     RegisterLuaFolder_R(pDownloadablesTable, "lua/addons/server");
 }
+#endif
 
 // Рекурсивный запуск клиентских скриптов
 void IncludeClientFolder_R(const char* pszCurrentPath)
@@ -892,7 +1663,6 @@ void IncludeClientFolder_R(const char* pszCurrentPath)
     FileFindHandle_t findHandle;
     const char* pFileName = filesystem->FindFirst(szSearchPath, &findHandle);
 
-    // 1. Запускаем файлы в текущей папке
     while (pFileName)
     {
         if (pFileName[0] != '.')
@@ -900,10 +1670,28 @@ void IncludeClientFolder_R(const char* pszCurrentPath)
             char szFullFilePath[MAX_PATH];
             Q_snprintf(szFullFilePath, sizeof(szFullFilePath), "%s/%s", pszCurrentPath, pFileName);
 
-            // ТУТ ТВOЙ КОД ЗАПУСКА LUA. Например:
-            // MyLuaState->ExecuteFile(szFullFilePath);
+            // Выполняем файл в текущем Lua-контексте!
+            lua_State* L = LuaManager()->GetLuaHandle();
+            if (L)
+            {
+                FileHandle_t hFile = filesystem->Open(szFullFilePath, "rb", "GAME");
+                if (hFile)
+                {
+                    int nFileSize = filesystem->Size(hFile);
+                    char* pBuffer = new char[nFileSize + 1];
+                    int nBytesRead = filesystem->Read(pBuffer, nFileSize, hFile);
+                    pBuffer[nBytesRead] = '\0';
+                    filesystem->Close(hFile);
 
-            Msg("[Lua-Client] Executing addon file: %s\n", szFullFilePath);
+                    Msg("[Lua] exec %s\n", szFullFilePath);
+                    if (luaL_dostring(L, pBuffer) != 0)
+                    {
+                        Warning("[Lua-Client Error] %s: %s\n", pFileName, lua_tostring(L, -1));
+                        lua_pop(L, 1);
+                    }
+                    delete[] pBuffer;
+                }
+            }
         }
         pFileName = filesystem->FindNext(findHandle);
     }
@@ -940,27 +1728,331 @@ void LoadDownloadedServerAddons()
     IncludeClientFolder_R("lua/addons/server");
 }
 
+// ======================= LuaSync =======================
+// Sending client Lua scripts from the server to connecting clients through
+// the "LuaFile" user message (the engine does not download .lua files).
+// Message "LuaFile" must be registered on BOTH sides: usermessages->Register("LuaFile", -1);
+#define LUASYNC_CHUNK      200   // bytes of file data per message
+#define LUASYNC_PER_FRAME  4     // messages per server frame (avoids reliable overflow)
+
+#ifndef CLIENT_DLL
+
+struct LuaSync_t
+{
+    int  userid;
+    CUtlVector<CUtlString> files;
+    int  fileIdx;
+    int  offset;
+    bool haveFile;
+    CUtlBuffer data;
+    LuaSync_t() : userid(0), fileIdx(0), offset(0), haveFile(false) {}
+};
+static CUtlVector<LuaSync_t*> g_LuaSyncs;
+
+static void LuaSync_Collect_R(const char* dir, CUtlVector<CUtlString>& out)
+{
+    char mask[MAX_PATH];
+    Q_snprintf(mask, sizeof(mask), "%s/*", dir);
+
+    FileFindHandle_t h;
+    for (const char* f = filesystem->FindFirstEx(mask, "GAME", &h); f; f = filesystem->FindNext(h))
+    {
+        if (f[0] == '.') continue;
+
+        char full[MAX_PATH];
+        Q_snprintf(full, sizeof(full), "%s/%s", dir, f);
+
+        if (filesystem->FindIsDirectory(h))
+        {
+            LuaSync_Collect_R(full, out);
+        }
+        else
+        {
+            const char* ext = V_GetFileExtension(f);
+            if (ext && !Q_stricmp(ext, "lua"))
+                out.AddToTail(full);
+        }
+    }
+    filesystem->FindClose(h);
+}
+
+// A client asks for its scripts
+CON_COMMAND(lua_sync, "Internal: send client Lua addons to the requesting player")
+{
+    CBasePlayer* pPlayer = UTIL_GetCommandClient();
+    if (!pPlayer || pPlayer->IsBot())
+        return;
+
+    // the listen-server host reads files from disk
+    if (pPlayer == UTIL_GetListenServerHost())
+        return;
+
+    int userid = engine->GetPlayerUserId(pPlayer->edict());
+    FOR_EACH_VEC(g_LuaSyncs, i)
+    {
+        if (g_LuaSyncs[i]->userid == userid)
+            return;   // already sending
+    }
+
+    LuaSync_t* s = new LuaSync_t;
+    s->userid = userid;
+    LuaSync_Collect_R("lua/addons/client", s->files);
+    Msg("[LuaSync] sending %d file(s) to %s\n", s->files.Count(), pPlayer->GetPlayerName());
+    g_LuaSyncs.AddToTail(s);
+}
+
+static void LuaSync_Pump()
+{
+    for (int si = g_LuaSyncs.Count() - 1; si >= 0; si--)
+    {
+        LuaSync_t* sync = g_LuaSyncs[si];
+        CBasePlayer* pPlayer = UTIL_PlayerByUserId(sync->userid);
+        if (!pPlayer)
+        {
+            delete sync;
+            g_LuaSyncs.Remove(si);
+            continue;
+        }
+
+        CSingleUserRecipientFilter filter(pPlayer);
+        filter.MakeReliable();
+
+        bool bDone = false;
+        for (int n = 0; n < LUASYNC_PER_FRAME && !bDone; n++)
+        {
+            if (!sync->haveFile)
+            {
+                if (sync->fileIdx >= sync->files.Count())
+                {
+                    UserMessageBegin(filter, "LuaFile");
+                        WRITE_BYTE(3);               // everything sent
+                    MessageEnd();
+                    bDone = true;
+                    break;
+                }
+
+                sync->data.Purge();
+                const char* path = sync->files[sync->fileIdx].Get();
+                if (!filesystem->ReadFile(path, "GAME", sync->data))
+                {
+                    sync->fileIdx++;
+                    n--;                              // do not count a skipped file
+                    continue;
+                }
+                sync->offset   = 0;
+                sync->haveFile = true;
+
+                UserMessageBegin(filter, "LuaFile");
+                    WRITE_BYTE(1);                   // file header
+                    WRITE_STRING(path);
+                    WRITE_LONG(sync->data.TellPut());
+                MessageEnd();
+                continue;
+            }
+
+            int left = sync->data.TellPut() - sync->offset;
+            if (left <= 0)
+            {
+                sync->haveFile = false;
+                sync->fileIdx++;
+                n--;
+                continue;
+            }
+
+            int len = (left < LUASYNC_CHUNK) ? left : LUASYNC_CHUNK;
+            const unsigned char* pBytes = (const unsigned char*)sync->data.Base() + sync->offset;
+
+            UserMessageBegin(filter, "LuaFile");
+                WRITE_BYTE(2);                       // data chunk
+                WRITE_BYTE(len);
+                for (int b = 0; b < len; b++)
+                    WRITE_BYTE(pBytes[b]);
+            MessageEnd();
+            sync->offset += len;
+        }
+
+        if (bDone)
+        {
+            delete sync;
+            g_LuaSyncs.Remove(si);
+        }
+    }
+}
+
+#else   // -------------------- CLIENT --------------------
+
+struct LuaRecvFile_t
+{
+    CUtlString path;
+    CUtlBuffer data;
+    int        total;
+    LuaRecvFile_t() : total(0) {}
+};
+static CUtlVector<LuaRecvFile_t*> s_RecvFiles;
+static LuaRecvFile_t*             s_pCurFile = NULL;
+
+static void LuaSync_ClearReceived()
+{
+    s_RecvFiles.PurgeAndDeleteElements();
+    delete s_pCurFile;
+    s_pCurFile = NULL;
+}
+
+static void LuaSync_ExecuteReceived()
+{
+    lua_State* L = LuaManager()->GetLuaHandle();
+
+    FOR_EACH_VEC(s_RecvFiles, i)
+    {
+        LuaRecvFile_t* f = s_RecvFiles[i];
+        if (L)
+        {
+            char chunkName[300];
+            Q_snprintf(chunkName, sizeof(chunkName), "@%s", f->path.Get());
+
+            Msg("[Lua] exec (from server) %s\n", f->path.Get());
+            int err = luaL_loadbuffer(L, (const char*)f->data.Base(), f->data.TellPut(), chunkName);
+            if (err == 0)
+                err = lua_pcall(L, 0, 0, 0);
+            if (err != 0)
+            {
+                Warning("[Lua] %s: %s\n", f->path.Get(), lua_tostring(L, -1));
+                lua_pop(L, 1);
+            }
+        }
+    }
+    LuaSync_ClearReceived();
+}
+
+static void __MsgFunc_LuaFile(bf_read& msg)
+{
+    int type = msg.ReadByte();
+
+    if (type == 1)          // file header
+    {
+        char path[260];
+        msg.ReadString(path, sizeof(path));
+        int total = msg.ReadLong();
+
+        delete s_pCurFile;
+        s_pCurFile = NULL;
+
+        // accept only scripts from lua/addons/client/
+        if (Q_strnicmp(path, "lua/addons/client/", 18) != 0 || Q_strstr(path, ".."))
+            return;
+
+        s_pCurFile = new LuaRecvFile_t;
+        s_pCurFile->path  = path;
+        s_pCurFile->total = total;
+
+        if (total <= 0)
+        {
+            s_RecvFiles.AddToTail(s_pCurFile);
+            s_pCurFile = NULL;
+        }
+    }
+    else if (type == 2)     // data chunk
+    {
+        int len = msg.ReadByte();
+        unsigned char buf[256];
+        for (int i = 0; i < len; i++)
+            buf[i] = (unsigned char)msg.ReadByte();
+
+        if (!s_pCurFile)
+            return;
+
+        s_pCurFile->data.Put(buf, len);
+        if (s_pCurFile->data.TellPut() >= s_pCurFile->total)
+        {
+            s_RecvFiles.AddToTail(s_pCurFile);
+            s_pCurFile = NULL;
+        }
+    }
+    else if (type == 3)     // all files received
+    {
+        LuaSync_ExecuteReceived();
+    }
+}
+
+#endif
+// ===================== /LuaSync ========================
+
 class CLuaAddonSystem : public CAutoGameSystemPerFrame
 {
 public:
-    // Конструктор передает имя системы в базовый класс движка
     CLuaAddonSystem() : CAutoGameSystemPerFrame("LuaAddonSystem") {}
 
-    // Этот метод движок сам вызовет на клиенте, когда карта загрузится
-    // и все объекты (Entities) будут созданы и готовы к работе
-    virtual void LevelInitPostEntity() override
+    virtual bool Init() override
     {
-        // Вызываем твою функцию загрузки аддонов
-        LoadDownloadedClientAddons();
-        LoadDownloadedServerAddons();
+        LuaManager()->Init();
+        return true;   // false here would abort loading client.dll / server.dll
     }
 
-    // (Опционально) Вызывается, когда игрок выходит с сервера или меняет карту
+    virtual void Shutdown() override
+    {
+        LuaManager()->Shutdown();
+    }
+
+#ifdef CLIENT_DLL
+    virtual void PostInit() override
+    {
+        // all user messages are registered by now
+        usermessages->HookMessage("LuaFile", __MsgFunc_LuaFile);
+    }
+
+    virtual void LevelInitPostEntity() override
+    {
+        Msg("[Lua] LevelInitPostEntity (client)\n");
+
+        // local files (listen-server host / developer machine)
+        IncludeClientFolder_R("lua/addons/client");
+
+        // remote client: ask the server for its client scripts a bit later
+        INetChannelInfo* nci = engine->GetNetChannelInfo();
+        m_flSyncAt = (nci && !nci->IsLoopback()) ? gpGlobals->realtime + 2.0f : 0.0f;
+    }
+
     virtual void LevelShutdownPostEntity() override
     {
-        // Если у тебя в Lua есть событие "ShutDown" или очистка памяти,
-        // её можно вызвать здесь.
+        m_flSyncAt = 0.0f;
+        LuaSync_ClearReceived();
+        LuaHud_RemoveAll();
     }
+
+    virtual void Update(float frametime) override
+    {
+        if (m_flSyncAt > 0.0f && gpGlobals->realtime >= m_flSyncAt)
+        {
+            m_flSyncAt = 0.0f;
+            Msg("[Lua] requesting client scripts from server\n");
+            engine->ServerCmd("lua_sync");
+        }
+
+        lua_State* L = LuaManager()->GetLuaHandle();
+        if (L)
+            Lua_CallGlobal(L, "HUDThink");
+    }
+
+private:
+    float m_flSyncAt = 0.0f;
+
+#else
+    virtual void LevelInitPostEntity() override
+    {
+        Msg("[Lua] LevelInitPostEntity (server)\n");
+        IncludeClientFolder_R("lua/addons/server");
+    }
+
+    virtual void FrameUpdatePostEntityThink() override
+    {
+        LuaSync_Pump();
+    }
+
+    virtual void LevelShutdownPreEntity() override
+    {
+        g_LuaSyncs.PurgeAndDeleteElements();
+    }
+#endif
 };
 
 // КРИТИЧЕСКИ ВАЖНАЯ СТРОКА: Создаем статический экземпляр класса.
@@ -1009,12 +2101,6 @@ bool CLuaManager::Init() {
         return false;
     }
 
-#ifndef CLIENT_DLL
-    LoadAddons();
-#else
-    LoadClientAddons();
-#endif
-
     return INIT_OK;
 }
 
@@ -1039,6 +2125,35 @@ void CLuaManager::RegGlobals() {
     // Регистрация флагов игрока (из const.h)
     lua_pushnumber(m_pLuaState, (1 << 0)); lua_setglobal(m_pLuaState, "FL_ONGROUND"); // Игрок на земле
     lua_pushnumber(m_pLuaState, (1 << 1)); lua_setglobal(m_pLuaState, "FL_DUCKING");  // Игрок присел
+
+    // Регистрация клавиш
+    lua_pushnumber(m_pLuaState, (1 << 0)); lua_setglobal(m_pLuaState, "IN_ATTACK");
+    lua_pushnumber(m_pLuaState, (1 << 1)); lua_setglobal(m_pLuaState, "IN_JUMP");
+    lua_pushnumber(m_pLuaState, (1 << 2)); lua_setglobal(m_pLuaState, "IN_DUCK");
+    lua_pushnumber(m_pLuaState, (1 << 3)); lua_setglobal(m_pLuaState, "IN_FORWARD");
+    lua_pushnumber(m_pLuaState, (1 << 4)); lua_setglobal(m_pLuaState, "IN_BACK");
+    lua_pushnumber(m_pLuaState, (1 << 5)); lua_setglobal(m_pLuaState, "IN_USE");
+    lua_pushnumber(m_pLuaState, (1 << 6)); lua_setglobal(m_pLuaState, "IN_CANCEL"); 
+    lua_pushnumber(m_pLuaState, (1 << 7)); lua_setglobal(m_pLuaState, "IN_LEFT");
+    lua_pushnumber(m_pLuaState, (1 << 8)); lua_setglobal(m_pLuaState, "IN_RIGHT");
+    lua_pushnumber(m_pLuaState, (1 << 9)); lua_setglobal(m_pLuaState, "IN_MOVELEFT");
+    lua_pushnumber(m_pLuaState, (1 << 10)); lua_setglobal(m_pLuaState, "IN_MOVERIGHT");
+    lua_pushnumber(m_pLuaState, (1 << 11)); lua_setglobal(m_pLuaState, "IN_ATTACK2");
+    lua_pushnumber(m_pLuaState, (1 << 12)); lua_setglobal(m_pLuaState, "IN_RUN");
+    lua_pushnumber(m_pLuaState, (1 << 13)); lua_setglobal(m_pLuaState, "IN_RELOAD");
+    lua_pushnumber(m_pLuaState, (1 << 14)); lua_setglobal(m_pLuaState, "IN_ALT1");
+    lua_pushnumber(m_pLuaState, (1 << 15)); lua_setglobal(m_pLuaState, "IN_ALT2");
+    lua_pushnumber(m_pLuaState, (1 << 16)); lua_setglobal(m_pLuaState, "IN_SCORE");
+    lua_pushnumber(m_pLuaState, (1 << 17)); lua_setglobal(m_pLuaState, "IN_SPEED");
+    lua_pushnumber(m_pLuaState, (1 << 18)); lua_setglobal(m_pLuaState, "IN_WALK");
+    lua_pushnumber(m_pLuaState, (1 << 19)); lua_setglobal(m_pLuaState, "IN_ZOOM");
+    lua_pushnumber(m_pLuaState, (1 << 20)); lua_setglobal(m_pLuaState, "IN_WEAPON1");
+    lua_pushnumber(m_pLuaState, (1 << 21)); lua_setglobal(m_pLuaState, "IN_WEAPON2");
+    lua_pushnumber(m_pLuaState, (1 << 22)); lua_setglobal(m_pLuaState, "IN_BULLRUSH");
+    lua_pushnumber(m_pLuaState, (1 << 23)); lua_setglobal(m_pLuaState, "IN_GRENADE1");
+    lua_pushnumber(m_pLuaState, (1 << 24)); lua_setglobal(m_pLuaState, "IN_GRENADE2");
+    lua_pushnumber(m_pLuaState, (1 << 25)); lua_setglobal(m_pLuaState, "IN_ATTACK3");
+    lua_pushnumber(m_pLuaState, (1 << 26)); lua_setglobal(m_pLuaState, "IN_DROP");
 }
 
 // 3.4 RegFunctions
@@ -1047,20 +2162,68 @@ void CLuaManager::RegFunctions() {
     lua_register(m_pLuaState, "Warning",         Lua_Warning);
     lua_register(m_pLuaState, "Error",           Lua_Error);
     lua_register(m_pLuaState, "RegisterCommand", Lua_RegisterConCommand);
+    lua_register(m_pLuaState, "InitSerialPort",  Lua_InitSerialPort);
+    lua_register(m_pLuaState, "SendToArduino",   Lua_SendToArduino);
+    lua_register(m_pLuaState, "CloseSerialPort", Lua_CloseSerialPort);
+
+#ifdef CLIENT_DLL
+    lua_register(m_pLuaState, "RunConsoleCommand", Lua_RunConsoleCommand);
+    lua_register(m_pLuaState, "GetScreenSize", Lua_GetScreenSize);
+    lua_register(m_pLuaState, "ServerCmd", Lua_ServerCmd);
+    lua_register(m_pLuaState, "IsKeyDown", Lua_IsKeyDown);
+    lua_register(m_pLuaState, "IsKeyPressed", Lua_IsKeyPressed);
+
+    // Глобальная библиотека vgui в Lua
+    lua_newtable(m_pLuaState);
+    lua_pushcfunction(m_pLuaState, Lua_VGUI_CreateFrame);   lua_setfield(m_pLuaState, -2, "CreateFrame");
+    lua_pushcfunction(m_pLuaState, Lua_VGUI_CreateLabel);   lua_setfield(m_pLuaState, -2, "CreateLabel");
+    lua_setglobal(m_pLuaState, "vgui");
+
+    // Метатаблица объектов VGUIPanel
+    luaL_newmetatable(m_pLuaState, PANEL_META);
+
+    lua_pushvalue(m_pLuaState, -1);
+    lua_setfield(m_pLuaState, -2, "__index");
+
+    lua_pushcfunction(m_pLuaState, LuaPanel_SetSize);       lua_setfield(m_pLuaState, -2, "SetSize");
+    lua_pushcfunction(m_pLuaState, LuaPanel_SetPos);        lua_setfield(m_pLuaState, -2, "SetPos");
+    lua_pushcfunction(m_pLuaState, LuaPanel_AddButton);     lua_setfield(m_pLuaState, -2, "AddButton");
+    lua_pushcfunction(m_pLuaState, LuaPanel_AddImage);      lua_setfield(m_pLuaState, -2, "AddImage");
+    lua_pushcfunction(m_pLuaState, LuaPanel_AddTextEntry);  lua_setfield(m_pLuaState, -2, "AddTextEntry");
+    lua_pushcfunction(m_pLuaState, LuaPanel_GetTextEntry);  lua_setfield(m_pLuaState, -2, "GetTextEntry");
+    lua_pushcfunction(m_pLuaState, LuaPanel_Close);         lua_setfield(m_pLuaState, -2, "Close");
+    lua_pushcfunction(m_pLuaState, LuaPanel_MakePopup);     lua_setfield(m_pLuaState, -2, "MakePopup");
+    lua_pushcfunction(m_pLuaState, LuaPanel_GetText);       lua_setfield(m_pLuaState, -2, "GetText");
+    lua_pushcfunction(m_pLuaState, LuaPanel_SetText);       lua_setfield(m_pLuaState, -2, "SetText");
+    lua_pushcfunction(m_pLuaState, LuaPanel_SetColor);      lua_setfield(m_pLuaState, -2, "SetColor");
+    lua_pushcfunction(m_pLuaState, LuaPanel_SetFont);       lua_setfield(m_pLuaState, -2, "SetFont");
+    lua_pushcfunction(m_pLuaState, LuaPanel_SetVisible);    lua_setfield(m_pLuaState, -2, "SetVisible");
+
+    lua_pop(m_pLuaState, 1);
+
+    // Глобальная библотека cl_player в Lua
+    lua_newtable(m_pLuaState);
+    lua_pushcfunction(m_pLuaState, LuaClientPlayer_GetHealth);       lua_setfield(m_pLuaState, -2, "GetHealth");
+    lua_pushcfunction(m_pLuaState, LuaClientPlayer_GetVelocity);     lua_setfield(m_pLuaState, -2, "GetVelocity");
+    lua_pushcfunction(m_pLuaState, LuaClientPlayer_GetCurrentItem);  lua_setfield(m_pLuaState, -2, "GetCurrentItem");
+    lua_setglobal(m_pLuaState, "cl_player");
+#endif
 
 #ifndef CLIENT_DLL
     lua_register(m_pLuaState, "ServerCommand",          Lua_ServerCommand);
-    lua_register(m_pLuaState, "ShootBullets",           LuaWeapon_ShootBullets);
-    lua_register(m_pLuaState, "RegisterWeapon",         Lua_RegisterWeapon);
     lua_register(m_pLuaState, "KillAllPlayers",         Lua_KillAllPlayers);
+    lua_register(m_pLuaState, "ShowTitle",              Lua_ShowTitle);
+    lua_register(m_pLuaState, "GetMapName",             Lua_GetMapName);
     lua_register(m_pLuaState, "GetLocalPlayer",         Lua_GetLocalPlayer);
+    lua_register(m_pLuaState, "GetPlayers",             Lua_GetPlayers);
+    lua_register(m_pLuaState, "GetCommandPlayer",       Lua_GetCommandPlayer);
     lua_register(m_pLuaState, "CreateNextBot",          Lua_CreateNextBot);
     lua_register(m_pLuaState, "SetBotSprite",           Lua_SetBotSprite);
     lua_register(m_pLuaState, "EmitEntitySound",        Lua_EmitEntitySound);
     lua_register(m_pLuaState, "SpawnPhysicsProp",       Lua_SpawnPhysicsProp);
     lua_register(m_pLuaState, "SpawnDynamicProp",       Lua_SpawnDynamicProp);
     lua_register(m_pLuaState, "PlaySoundAtCoordinates", Lua_PlaySoundAtCoordinates);
-
+    
     // ---- СОЗДАНИЕ КЛАССА PLAYER В LUA ----
 
     // 1. Создаем новую метаблицу в реестре Lua
@@ -1071,26 +2234,35 @@ void CLuaManager::RegFunctions() {
     lua_setfield(m_pLuaState, -2, "__index");
 
     // 3. Заполняем таблицу методами нашего класса
-    lua_pushcfunction(m_pLuaState, LuaPlayer_GetHealth);    lua_setfield(m_pLuaState, -2, "GetHealth");
-    lua_pushcfunction(m_pLuaState, LuaPlayer_SetHealth);    lua_setfield(m_pLuaState, -2, "SetHealth");
-    lua_pushcfunction(m_pLuaState, LuaPlayer_GiveItem);     lua_setfield(m_pLuaState, -2, "GiveItem");
-    lua_pushcfunction(m_pLuaState, LuaPlayer_GetSpeed);     lua_setfield(m_pLuaState, -2, "GetSpeed");
-    lua_pushcfunction(m_pLuaState, LuaPlayer_SetSpeed);     lua_setfield(m_pLuaState, -2, "SetSpeed");
-    lua_pushcfunction(m_pLuaState, LuaPlayer_GetName);      lua_setfield(m_pLuaState, -2, "GetName");
-    lua_pushcfunction(m_pLuaState, LuaPlayer_SetTeam);      lua_setfield(m_pLuaState, -2, "SetTeam");
-    lua_pushcfunction(m_pLuaState, LuaPlayer_GetTeam);      lua_setfield(m_pLuaState, -2, "GetTeam");
-    lua_pushcfunction(m_pLuaState, LuaPlayer_IsOnGround);   lua_setfield(m_pLuaState, -2, "IsOnGround");
-    lua_pushcfunction(m_pLuaState, LuaPlayer_ChatPrint);    lua_setfield(m_pLuaState, -2, "ChatPrint");
-    lua_pushcfunction(m_pLuaState, LuaPlayer_GetPos);       lua_setfield(m_pLuaState, -2, "GetPos");
-    lua_pushcfunction(m_pLuaState, LuaPlayer_SetPos);       lua_setfield(m_pLuaState, -2, "SetPos");
-    lua_pushcfunction(m_pLuaState, LuaPlayer_StripWeapons); lua_setfield(m_pLuaState, -2, "StripWeapons");
-    lua_pushcfunction(m_pLuaState, LuaPlayer_Kill);         lua_setfield(m_pLuaState, -2, "Kill");
-    lua_pushcfunction(m_pLuaState, LuaPlayer_PlaySound);    lua_setfield(m_pLuaState, -2, "PlaySound");
-    lua_pushcfunction(m_pLuaState, LuaPlayer_ConCommand);   lua_setfield(m_pLuaState, -2, "ConCommand");
-#endif
+    lua_pushcfunction(m_pLuaState, LuaPlayer_GetHealth);        lua_setfield(m_pLuaState, -2, "GetHealth");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_SetHealth);        lua_setfield(m_pLuaState, -2, "SetHealth");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_GiveItem);         lua_setfield(m_pLuaState, -2, "GiveItem");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_GetCurrentItem);   lua_setfield(m_pLuaState, -2, "GetCurrentItem");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_GetSpeed);         lua_setfield(m_pLuaState, -2, "GetSpeed");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_SetSpeed);         lua_setfield(m_pLuaState, -2, "SetSpeed");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_GetName);          lua_setfield(m_pLuaState, -2, "GetName");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_SetTeam);          lua_setfield(m_pLuaState, -2, "SetTeam");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_GetTeam);          lua_setfield(m_pLuaState, -2, "GetTeam");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_IsOnGround);       lua_setfield(m_pLuaState, -2, "IsOnGround");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_ChatPrint);        lua_setfield(m_pLuaState, -2, "ChatPrint");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_ShowHint);         lua_setfield(m_pLuaState, -2, "ShowHint");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_GetPos);           lua_setfield(m_pLuaState, -2, "GetPos");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_SetPos);           lua_setfield(m_pLuaState, -2, "SetPos");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_GetEyeVector);     lua_setfield(m_pLuaState, -2, "GetEyeVector");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_ApplyImpulse);     lua_setfield(m_pLuaState, -2, "ApplyImpulse");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_StripWeapons);     lua_setfield(m_pLuaState, -2, "StripWeapons");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_SetGravity);       lua_setfield(m_pLuaState, -2, "SetGravity");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_Kill);             lua_setfield(m_pLuaState, -2, "Kill");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_Ignite);           lua_setfield(m_pLuaState, -2, "Ignite");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_SetFOV);           lua_setfield(m_pLuaState, -2, "SetFOV");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_SetModel);         lua_setfield(m_pLuaState, -2, "SetModel");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_SetColor);         lua_setfield(m_pLuaState, -2, "SetColor");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_PlaySound);        lua_setfield(m_pLuaState, -2, "PlaySound");
+    lua_pushcfunction(m_pLuaState, LuaPlayer_ConCommand);       lua_setfield(m_pLuaState, -2, "ConCommand");
 
     // Очищаем стек после регистрации метаблицы
     lua_pop(m_pLuaState, 1);
+#endif
 
 #ifndef CLIENT_DLL
     // 1. Создаем метатаблицу для Entity в реестре Lua
@@ -1105,13 +2277,25 @@ void CLuaManager::RegFunctions() {
     lua_pushcfunction(m_pLuaState, LuaEntity_ApplyTorque);  lua_setfield(m_pLuaState, -2, "ApplyTorque");
     lua_pushcfunction(m_pLuaState, LuaEntity_GetPos);       lua_setfield(m_pLuaState, -2, "GetPos");
     lua_pushcfunction(m_pLuaState, LuaWeapon_GetClassname); lua_setfield(m_pLuaState, -2, "GetClassname");
-#endif
 
     // Очищаем стек после регистрации метатаблицы
     lua_pop(m_pLuaState, 1);
+#endif
 }
 
-void CLuaManager::CallHook(const char* hookName, CBasePlayer* pPlayer)
+void CLuaManager::Think()
+{
+    double flCurrentTime = Plat_FloatTime(); // Получаем текущее время в секундах
+
+    // 100 миллисекунд = 0.1 секунды
+    if (flCurrentTime - m_flLastThinkTime >= 0.1)
+    {
+        m_flLastThinkTime = flCurrentTime; // Обновляем время последнего вызова
+        CallHook("Think");                 // Вызываем наш хук
+    }
+}
+
+void CLuaManager::CallPlayerHook(const char* hookName, CBasePlayer* pPlayer)
 {
     if (!m_pLuaState || !pPlayer) return;
 
@@ -1123,6 +2307,26 @@ void CLuaManager::CallHook(const char* hookName, CBasePlayer* pPlayer)
         PushPlayerObject(m_pLuaState, pPlayer);
 
         if (lua_pcall(m_pLuaState, 1, 0, 0) != 0)
+        {
+            Warning("Lua Hook Error (%s): %s\n", hookName, lua_tostring(m_pLuaState, -1));
+        }
+    }
+    else
+    {
+        lua_pop(m_pLuaState, 1);
+    }
+}
+
+void CLuaManager::CallHook(const char* hookName)
+{
+    if (!m_pLuaState) return;
+
+    lua_getglobal(m_pLuaState, hookName);
+
+    if (lua_isfunction(m_pLuaState, -1))
+    {
+        // ВАЖНО: Используем нашу функцию для упаковки указателя в ООП-объект Lua
+        if (lua_pcall(m_pLuaState, 0, 0, 0) != 0)
         {
             Warning("Lua Hook Error (%s): %s\n", hookName, lua_tostring(m_pLuaState, -1));
         }
@@ -1177,6 +2381,34 @@ void CLuaManager::LoadAddons()
 #ifdef CLIENT_DLL
 void CLuaManager::LoadClientAddons()
 {
+    if (!m_pLuaState)
+    {
+        Warning(" [Client Lua] m_pLuaState is NULL!\n");
+        return;
+    }
+
+    // ==========================================
+    // СТРАХОВКА: Регистрируем vgui прямо здесь перед запуском скриптов!
+    // ==========================================
+    lua_getglobal(m_pLuaState, "vgui");
+    if (!lua_istable(m_pLuaState, -1))
+    {
+        lua_pop(m_pLuaState, 1); // убираем nil со стека
+
+        // Создаем таблицу vgui
+        lua_newtable(m_pLuaState);
+        lua_pushcfunction(m_pLuaState, Lua_VGUI_CreateFrame);
+        lua_setfield(m_pLuaState, -2, "CreateFrame");
+        lua_setglobal(m_pLuaState, "vgui");
+
+        Msg("[Client Lua] Таблица 'vgui' была аварийно зарегистрирована в LoadClientAddons!\n");
+    }
+    else
+    {
+        lua_pop(m_pLuaState, 1);
+    }
+    // ==========================================
+
     if (!filesystem)
     {
         Warning(" [Client Lua] Filesystem interface is not ready yet!\n");
@@ -1184,19 +2416,16 @@ void CLuaManager::LoadClientAddons()
     }
 
     FileFindHandle_t findHandle;
-    // Ищем все файлы с расширением .lua в папке lua/addons/
     const char* pFileName = filesystem->FindFirstEx("lua/addons/client/*.lua", "GAME", &findHandle);
 
     while (pFileName != NULL)
     {
-        // Строим полный путь к найденному файлу
         char fullPath[256];
         Q_snprintf(fullPath, sizeof(fullPath), "lua/addons/client/%s", pFileName);
 
         Msg("\n****** LUA ADDON LOADING ******\n");
         Msg("Loading Lua Addon: %s\n", fullPath);
 
-        // Читаем и запускаем этот файл (код аналогичен вашему Init())
         FileHandle_t hFile = filesystem->Open(fullPath, "r", "GAME");
         if (hFile)
         {
@@ -1213,7 +2442,6 @@ void CLuaManager::LoadClientAddons()
             delete[] pBuffer;
         }
 
-        // Переходим к следующему файлу в папке
         pFileName = filesystem->FindNext(findHandle);
     }
 

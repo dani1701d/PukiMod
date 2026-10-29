@@ -718,6 +718,8 @@ void CBaseCombatWeapon::Drop( const Vector &vecVelocity )
 	SetOwnerEntity( NULL );
 	SetOwner( NULL );
 
+	m_bInReload = false;
+
 	// If we're not allowing to spawn due to the gamerules,
 	// remove myself when I'm dropped by an NPC.
 	if ( pOwner && pOwner->IsNPC() )

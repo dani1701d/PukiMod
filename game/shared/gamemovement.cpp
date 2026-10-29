@@ -1,4 +1,4 @@
-//========= Copyright Valve Corporation, All rights reserved. ============//
+﻿//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -61,6 +61,15 @@ ConVar option_duck_method("option_duck_method", "1", FCVAR_REPLICATED|FCVAR_ARCH
 
 // [MD] I'll remove this eventually. For now, I want the ability to A/B the optimizations.
 bool g_bMovementOptimizations = true;
+
+// Camera Bob
+ConVar cl_viewbob_enabled("cl_viewbob_enabled", "1", 0, "Oscillation Toggle", true, 0, true, 1);
+ConVar cl_viewbob_timer("cl_viewbob_timer", "10", 0, "Speed of Oscillation");
+ConVar cl_viewbob_scale("cl_viewbob_scale", "0.05", 0, "Magnitude of Oscillation");
+
+// Speed based on Health
+static ConVar sv_health_speed_threshold("sv_health_speed_threshold", "80", FCVAR_REPLICATED | FCVAR_CHEAT, "Здоровье, ниже которого начинается замедление.");
+static ConVar sv_health_speed_min("sv_health_speed_min", "0.40", FCVAR_REPLICATED | FCVAR_CHEAT, "Минимальный коэффициент скорости (0.0 - 1.0) при смерти.");
 
 // Roughly how often we want to update the info about the ground surface we're on.
 // We don't need to do this very often.
@@ -1892,6 +1901,15 @@ void CGameMovement::StayOnGround( void )
 //-----------------------------------------------------------------------------
 void CGameMovement::WalkMove( void )
 {
+	//view bob code
+	if (cl_viewbob_enabled.GetInt() == 1 && !engine->IsPaused())
+	{
+		float xoffset = sin(gpGlobals->curtime * cl_viewbob_timer.GetFloat()) * player->GetAbsVelocity().Length() * cl_viewbob_scale.GetFloat() / 100;
+		float yoffset = sin(2 * gpGlobals->curtime * cl_viewbob_timer.GetFloat()) * player->GetAbsVelocity().Length() * cl_viewbob_scale.GetFloat() / 400;
+		player->ViewPunch(QAngle(xoffset, yoffset, 0));
+	}
+	//end view bob code
+
 	int i;
 
 	Vector wishvel;
@@ -4700,6 +4718,33 @@ void CGameMovement::PlayerMove( void )
 		default:
 			DevMsg( 1, "Bogus pmove player movetype %i on (%i) 0=cl 1=sv\n", player->GetMoveType(), player->IsServer());
 			break;
+	}
+
+	if (player)
+	{
+		int iHealth = player->GetHealth();
+		float flSpeedModifier = 1.0f;
+
+		int iMaxHealthThreshold = sv_health_speed_threshold.GetInt();
+		float flMinSpeedModifier = sv_health_speed_min.GetFloat();
+
+		if (iHealth <= iMaxHealthThreshold && iHealth > 0)
+		{
+			float flHealthRatio = (float)iHealth / (float)iMaxHealthThreshold;
+			flSpeedModifier = flMinSpeedModifier + ((1.0f - flMinSpeedModifier) * flHealthRatio);
+		}
+		else if (iHealth <= 0)
+		{
+			flSpeedModifier = flMinSpeedModifier;
+		}
+
+		// Режем скорость и финальные вектора движения
+		mv->m_flMaxSpeed *= flSpeedModifier;
+		mv->m_flClientMaxSpeed *= flSpeedModifier;
+
+		// Масштабируем текущую скорость перемещения, чтобы движок физически замедлил игрока
+		mv->m_vecVelocity.x *= flSpeedModifier;
+		mv->m_vecVelocity.y *= flSpeedModifier;
 	}
 }
 

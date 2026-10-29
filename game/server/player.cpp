@@ -1753,7 +1753,10 @@ void CBasePlayer::Event_Killed( const CTakeDamageInfo &info )
 
 	BaseClass::Event_Killed( info );
 
-	LuaManager()->CallHook("OnPlayerKilled", this);
+	color32 black = { 0, 0, 0, 255 };
+	UTIL_ScreenFade(this, black, 1.0f, 2.0f, FFADE_OUT | FFADE_STAYOUT);
+
+	LuaManager()->CallPlayerHook("OnPlayerKilled", this);
 }
 
 void CBasePlayer::Event_Dying( const CTakeDamageInfo& info )
@@ -1779,7 +1782,7 @@ void CBasePlayer::Event_Dying( const CTakeDamageInfo& info )
 	SetNextThink( gpGlobals->curtime + 0.1f );
 	BaseClass::Event_Dying( info );
 
-	LuaManager()->CallHook("OnPlayerDying", this);
+	LuaManager()->CallPlayerHook("OnPlayerDying", this);
 }
 
 
@@ -5161,7 +5164,7 @@ void CBasePlayer::Spawn( void )
 
 	// Clear any screenfade
 	color32 nothing = {0,0,0,255};
-	UTIL_ScreenFade( this, nothing, 0, 0, FFADE_IN | FFADE_PURGE );
+	UTIL_ScreenFade( this, nothing, 0, 0, FFADE_OUT | FFADE_PURGE );
 
 	g_pGameRules->PlayerSpawn( this );
 
@@ -5199,7 +5202,7 @@ void CBasePlayer::Spawn( void )
 
 	m_weaponFiredTimer.Invalidate();
 
-	LuaManager()->CallHook("OnPlayerSpawn", this);
+	LuaManager()->CallPlayerHook("OnPlayerSpawn", this);
 }
 
 void CBasePlayer::Activate( void )
@@ -5465,6 +5468,9 @@ void CBasePlayer::CommitSuicide( bool bExplode /*= false*/, bool bForce /*= fals
 	Event_Killed( info );
 	Event_Dying( info );
 	m_iSuicideCustomKillFlags = 0;
+
+	color32 black = { 0, 0, 0, 255 };
+	UTIL_ScreenFade(this, black, 1.0f, 2.0f, FFADE_OUT | FFADE_STAYOUT);
 }
 
 // Suicide with style...
@@ -5493,6 +5499,9 @@ void CBasePlayer::CommitSuicide( const Vector &vecForce, bool bExplode /*= false
 	info.SetDamageForce( vecForce );
 	info.SetDamagePosition( WorldSpaceCenter() );
 	TakeDamage( info );
+
+	color32 black = { 0, 0, 0, 255 };
+	UTIL_ScreenFade(this, black, 1.0f, 2.0f, FFADE_OUT | FFADE_STAYOUT);
 }
 
 //==============================================
@@ -6366,6 +6375,7 @@ void CBasePlayer::CheatImpulseCommands( int iImpulse )
 		GiveNamedItem( "weapon_ar2" );
 		GiveNamedItem( "weapon_shotgun" );
 		GiveNamedItem( "weapon_physcannon" );
+		GiveNamedItem( "weapon_grapple" );
 		GiveNamedItem( "weapon_physgun" );
 		GiveNamedItem( "weapon_bugbait" );
 		GiveNamedItem( "weapon_rpg" );
@@ -6844,7 +6854,7 @@ bool CBasePlayer::BumpWeapon( CBaseCombatWeapon *pWeapon )
 				// If it uses clips, load it full. (this is the first time you've picked up this type of weapon)
 				if ( pWeapon->UsesClipsForAmmo1() )
 				{
-					pWeapon->m_iClip1 = pWeapon->GetMaxClip1();
+					// pWeapon->m_iClip1 = pWeapon->GetMaxClip1();
 				}
 
 				Weapon_Switch( pWeapon );
@@ -6932,7 +6942,7 @@ Vector CBasePlayer::BodyTarget( const Vector &posSrc, bool bNoisy )
 	{
 		return EyePosition(); 
 	}
-};		
+}
 
 /*
 =========================================================

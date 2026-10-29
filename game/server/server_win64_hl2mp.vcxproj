@@ -197,11 +197,11 @@ if "%valveTmpIsReadOnlyLetter%"=="R" del /q "$(TargetDir)"$(TargetFileName)
     <PreLinkEvent />
     <Link>
       <AdditionalOptions> /ignore:4221</AdditionalOptions>
-      <AdditionalDependencies>;shell32.lib;user32.lib;advapi32.lib;gdi32.lib;comdlg32.lib;ole32.lib;winmm.lib</AdditionalDependencies>
+      <AdditionalDependencies>shell32.lib;user32.lib;advapi32.lib;gdi32.lib;comdlg32.lib;ole32.lib;winmm.lib</AdditionalDependencies>
       <ShowProgress>NotSet</ShowProgress>
       <OutputFile>$(OutDir)\server.dll</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
-      <AdditionalLibraryDirectories>..\..\lib\common\x64\2015\release;..\..\lib\public\x64</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>C:\pukimod reborn\src\lib;C:\pukimod reborn\src\lib\cmake;..\..\lib\common\x64\2015\release;..\..\lib\public\x64</AdditionalLibraryDirectories>
       <IgnoreSpecificDefaultLibraries>libc;libcd;libcmtd;libcpmtd;libcpmtd0;libcpmtd1</IgnoreSpecificDefaultLibraries>
       <GenerateDebugInformation>DebugFull</GenerateDebugInformation>
       <ProgramDatabaseFile>$(IntDir)/$(TargetName).pdb</ProgramDatabaseFile>
@@ -384,6 +384,7 @@ exit 1
     <ClInclude Include="..\shared\mp_shareddefs.h" />
     <ClInclude Include="..\..\public\networkvar.h" />
     <ClInclude Include="npc_barney_ball.h" />
+    <ClInclude Include="npc_luabot.h" />
     <ClInclude Include="npc_vehicledriver.h" />
     <ClInclude Include="..\shared\npcevent.h" />
     <ClInclude Include="..\..\public\vphysics\object_hash.h" />

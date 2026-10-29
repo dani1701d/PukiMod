@@ -1725,6 +1725,7 @@ void CWeaponRPG::ToggleGuiding( void )
 void CWeaponRPG::Drop( const Vector &vecVelocity )
 {
 	StopGuiding();
+	DecrementAmmo(GetOwner());
 
 	BaseClass::Drop( vecVelocity );
 }

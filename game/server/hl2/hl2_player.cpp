@@ -74,6 +74,8 @@ extern ConVar autoaim_max_dist;
 // the X/Y of the player's hull to get the volume to trace bullets against.
 #define PLAYER_HULL_REDUCTION	0.70
 
+static ConVar sv_weapon_drop_enabled("sv_weapon_drop_enabled", "1");
+
 // This switches between the single primary weapon, and multiple weapons with buckets approach (jdw)
 #define	HL2_SINGLE_PRIMARY_WEAPON_MODE	0
 
@@ -879,6 +881,16 @@ void CHL2_Player::PreThink(void)
 		m_iTrain = TRAIN_NEW; // turn off train
 	}
 
+	if (m_afButtonPressed & IN_DROP)
+	{
+		if (IsAlive() &&
+			!IsInAVehicle() &&
+			HasWeapons() &&
+			sv_weapon_drop_enabled.GetBool())
+		{
+			DropActiveWeapon();
+		}
+	}
 
 	//
 	// If we're not on the ground, we're falling. Update our falling velocity.
@@ -1062,6 +1074,18 @@ Class_T  CHL2_Player::Classify ( void )
 			return CLASS_PLAYER;
 		}
 	}
+}
+
+// Drop weapon 
+void CHL2_Player::DropActiveWeapon(void)
+{
+	Vector VecForward;
+
+	EyeVectors(&VecForward, NULL, NULL);
+
+	VecForward *= 300.0f;
+
+	BaseClass::Weapon_Drop(GetActiveWeapon(), NULL, &VecForward);
 }
 
 //-----------------------------------------------------------------------------

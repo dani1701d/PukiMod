@@ -1,0 +1,17 @@
+$Project = ''
+$Folder = 'mc2source_plugin'
+
+$CheckFatal = 'true'
+$GameFolder = 'hl2mp'
+$DebugSymbolFiles = 'true'
+
+$Folders = {}
+$Folders['pre_source_sdk2013'] = {'src/public}
+$Folders['source2013'] = {'src/common', 'src/engine', 'src/game', 'src/game/server', 'src/materialsystem', 'src/tier0', 'src/tier1', 'src/tier2', 'src/utils/serverplugin_sample', 'src/utils/mc2source_plugin'}
+
+$Configs = {}
+$Configs['mc2source_server_win64'] = {
+Files = {'mc2source_server.cpp'},
+Inherit = '$ServerPlugin',
+Configuration = /win64+server+plugin/,
+}

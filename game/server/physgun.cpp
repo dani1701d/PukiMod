@@ -515,6 +515,7 @@ public:
 	DECLARE_SERVERCLASS();
 
 private:
+	bool		m_canMoveProp;
 	CNetworkVar(int, m_active);
 	bool		m_useDown;
 	EHANDLE		m_hObject;
@@ -984,35 +985,30 @@ void CWeaponGravityGun::PrimaryAttack(void)
 	m_bBeamActive = false;
 
 	CBaseEntity* pAttachedEnt = m_gravCallback.m_attachedEntity;
-	if (pAttachedEnt)
+	if (m_canMoveProp == true)
 	{
-		IPhysicsObject* pPhysObject = pAttachedEnt->VPhysicsGetObject();
-		if (pPhysObject)
+		if (pAttachedEnt)
 		{
-			// ПРОВЕРКА: Если объект заморожен (!IsMoveable)
-			if (!pPhysObject->IsMoveable())
+			IPhysicsObject* pPhysObject = pAttachedEnt->VPhysicsGetObject();
+			if (pPhysObject)
 			{
-				// Размораживаем
-				pPhysObject->EnableMotion(true);
-				pPhysObject->Wake();
+				// ПРОВЕРКА: Если объект заморожен (!IsMoveable)
+				if (!pPhysObject->IsMoveable())
+				{
+					// Размораживаем
+					pPhysObject->EnableMotion(true);
+					pPhysObject->Wake();
 
-				// Воспроизводим зеркальный звук разморозки
-				pAttachedEnt->EmitSound("Physics.WeaponFX.Unfreeze"); // Убедитесь, что этот звук есть в скриптах, либо используйте "Physics.WeaponFX.Freeze"
+					// Создаем визуальный эффект разморозки (как у вас)
+					CEffectData data;
+					data.m_vOrigin = pAttachedEnt->GetAbsOrigin();
+					data.m_nEntIndex = pAttachedEnt->entindex();
+					DispatchEffect("PhyscannonAnimate", data);
 
-				// Создаем визуальный эффект разморозки (как у вас)
-				CEffectData data;
-				data.m_vOrigin = pAttachedEnt->GetAbsOrigin();
-				data.m_nEntIndex = pAttachedEnt->entindex();
-				DispatchEffect("PhyscannonAnimate", data);
-
-				return; // Выходим, чтобы не начать захват в этом же кадре
+					return; // Выходим, чтобы не начать захват в этом же кадре
+				}
 			}
 		}
-
-		// ЕСЛИ ОБЪЕКТ НЕ БЫЛ ЗАМОРОЖЕН:
-		// Здесь вызывайте ваш стандартный код для ЗАХВАТА/ПОДНЯТИЯ объекта физганом.
-		// Например: 
-		// GrabEntity( pEntity, tr );
 	}
 
 	m_flNextPrimaryAttack = gpGlobals->curtime + 0.1;
@@ -1031,6 +1027,11 @@ void CWeaponGravityGun::PrimaryAttack(void)
 
 void CWeaponGravityGun::SecondaryAttack(void)
 {
+	CBasePlayer* pOwner = ToBasePlayer(GetOwner());
+	if (!pOwner) return;
+
+	m_canMoveProp = false;
+
 	CBaseEntity* pAttachedEnt = m_gravCallback.m_attachedEntity;
 	if (pAttachedEnt)
 	{
@@ -1040,7 +1041,7 @@ void CWeaponGravityGun::SecondaryAttack(void)
 			pPhysObject->EnableMotion(false);
 			pPhysObject->SetVelocity(&vec3_origin, &vec3_origin);
 
-			pAttachedEnt->EmitSound("Physics.WeaponFX.Freeze");
+			pAttachedEnt->EmitSound("Weapon_Physgun.On");
 
 			CEffectData data;
 			data.m_vOrigin = pAttachedEnt->GetAbsOrigin();
@@ -1133,6 +1134,12 @@ void CWeaponGravityGun::ItemPostFrame(void)
 	if (pOwner->m_afButtonPressed & IN_ATTACK2)
 	{
 		SecondaryAttack();
+		if (!(pOwner->m_nButtons & IN_ATTACK))
+		{
+			m_canMoveProp = true;
+			return;
+		}
+		
 	}
 	else if (pOwner->m_nButtons & IN_ATTACK)
 	{
@@ -1166,6 +1173,51 @@ bool CWeaponGravityGun::HasAnyAmmo(void)
 //=========================================================
 bool CWeaponGravityGun::Reload(void)
 {
+	CBasePlayer* pOwner = ToBasePlayer(GetOwner());
+	if (!pOwner)
+		return false;
+
+	Vector vecStart, vecForward;
+	vecStart = pOwner->EyePosition(); // Начало луча (позиция глаз)
+	pOwner->EyeVectors(&vecForward); // Направление взгляда игрока
+
+	Vector vecEnd = vecStart + (vecForward * 8192.0f); // Конец луча на расстоянии 8192 юнитов
+
+	trace_t tr;
+	// Проводим луч (Raycast)
+	UTIL_TraceLine(vecStart, vecEnd, MASK_SHOT, pOwner, COLLISION_GROUP_NONE, &tr);
+
+	// Проверяем, попал ли луч в какой-либо объект
+	if (tr.m_pEnt)
+	{
+		CBaseEntity* pHitEntity = tr.m_pEnt;
+		if (pHitEntity)
+		{
+			IPhysicsObject* pPhysObject = pHitEntity->VPhysicsGetObject();
+			if (pPhysObject)
+			{
+				// ПРОВЕРКА: Если объект заморожен (!IsMoveable)
+				if (!pPhysObject->IsMoveable())
+				{
+					// Размораживаем
+					pPhysObject->EnableMotion(true);
+					pPhysObject->Wake();
+
+					// Воспроизводим зеркальный звук разморозки
+					pHitEntity->EmitSound("Weapon_Physgun.Off");
+
+					// Создаем визуальный эффект разморозки (как у вас)
+					CEffectData data;
+					data.m_vOrigin = pHitEntity->GetAbsOrigin();
+					data.m_nEntIndex = pHitEntity->entindex();
+					DispatchEffect("PhyscannonAnimate", data);
+
+					return true; // Выходим, чтобы не начать захват в этом же кадре
+				}
+			}
+		}
+	}
+
 	return false;
 }
 

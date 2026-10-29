@@ -75,6 +75,7 @@ private:
 	void	LobGrenade( CBasePlayer *pPlayer );
 	// check a throw from vecSrc.  If not valid, move the position back along the line to vecEye
 	void	CheckThrowPosition( CBasePlayer *pPlayer, const Vector &vecEye, Vector &vecSrc );
+	virtual void Drop(const Vector& vecVelocity);
 
 	CNetworkVar( bool,	m_bRedraw );	//Draw the weapon again after throwing a grenade
 	
@@ -554,3 +555,8 @@ void CWeaponFrag::RollGrenade( CBasePlayer *pPlayer )
 	m_bRedraw = true;
 }
 
+void CWeaponFrag::Drop(const Vector& vecVelocity)
+{
+	DecrementAmmo(GetOwner());
+	BaseClass::Drop(vecVelocity);
+}

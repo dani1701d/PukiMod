@@ -123,6 +123,9 @@ public:
 
 	Class_T				Classify ( void );
 
+	// Weapon Drop
+	void	DropActiveWeapon( void );
+
 	// from CBasePlayer
 	virtual void		SetupVisibility( CBaseEntity *pViewEntity, unsigned char *pvs, int pvssize );
 

@@ -473,14 +473,14 @@ void CBaseGameStats::Event_PlayerConnected( CBasePlayer *pBasePlayer )
 {
 	StatsLog( "CBaseGameStats::Event_PlayerConnected [%s]\n", pBasePlayer->GetPlayerName() );
 
-	LuaManager()->CallHook("OnPlayerConnected", pBasePlayer);
+	LuaManager()->CallPlayerHook("OnPlayerConnected", pBasePlayer);
 }
 
 void CBaseGameStats::Event_PlayerDisconnected( CBasePlayer *pBasePlayer )
 {
 	StatsLog( "CBaseGameStats::Event_PlayerDisconnected\n" );
 
-	LuaManager()->CallHook("OnPlayerDisonnected", pBasePlayer);
+	LuaManager()->CallPlayerHook("OnPlayerDisonnected", pBasePlayer);
 }
 
 void CBaseGameStats::Event_PlayerDamage( CBasePlayer *pBasePlayer, const CTakeDamageInfo &info )

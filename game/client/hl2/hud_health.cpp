@@ -1,3 +1,5 @@
+#include "cbase.h"
+/*
 //========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
@@ -168,3 +170,4 @@ void CHudHealth::MsgFunc_Damage( bf_read &msg )
 		}
 	}
 }
+*/

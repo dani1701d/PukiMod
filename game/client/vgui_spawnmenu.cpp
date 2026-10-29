@@ -1,5 +1,6 @@
 #include "cbase.h"
 #include "vgui_spawnmenu.h"
+#include "vgui_modelicon.h"
 #include <vgui/IVGui.h>
 #include <vgui/ISurface.h>
 #include <vgui/IInput.h>
@@ -74,10 +75,18 @@ void CSpawnMenu::LoadItemsFromConfig()
             // Проходим по всем элементам (пропам) внутри текущей категории
             for (KeyValues* pItem = pCategory->GetFirstSubKey(); pItem != nullptr; pItem = pItem->GetNextKey())
             {
-                const char* pIconPath = pItem->GetString("icon", "vgui/hud/xbox_reticle");
-
                 // Считываем тип элемента (по умолчанию "prop")
                 const char* pType = pItem->GetString("type", "prop");
+
+                // Явная текстура-иконка (необязательна). Если её нет, иконка рисуется из модели.
+                const char* pIconPath = pItem->GetString("icon", "");
+
+                // Модель для иконки: для prop это модель спавна, для остальных типов
+                // (weapon/npc/vehicle) её можно указать ключом "model" только для иконки.
+                // У ragdoll путь к модели лежит в ключе "class".
+                const char* pIconModel = pItem->GetString("model", "");
+                if (pIconModel[0] == '\0' && Q_strcmp(pType, "ragdoll") == 0)
+                    pIconModel = pItem->GetString("class", "");
 
                 if (iCurrentColumn == 0 || pRowPanel == nullptr)
                 {
@@ -105,11 +114,22 @@ void CSpawnMenu::LoadItemsFromConfig()
                 }
                 // ==================================
 
-                vgui::ImagePanel* pIconImage = new vgui::ImagePanel(pIconBtn, "SpawnIconImage");
-                pIconImage->SetBounds(0, 0, iIconSize, iIconSize);
-                pIconImage->SetImage(pIconPath);
-                pIconImage->SetShouldScaleImage(true);
-                pIconImage->SetMouseInputEnabled(false);
+                if (pIconPath[0] == '\0' && pIconModel[0] != '\0')
+                {
+                    // Иконка генерируется из 3D-модели, готовая картинка не нужна
+                    CModelIconPanel* pModelIcon = new CModelIconPanel(pIconBtn, "SpawnIconModel", pIconModel);
+                    pModelIcon->SetBounds(0, 0, iIconSize, iIconSize);
+                    pModelIcon->SetClipPanel(m_pMainScrollList);
+                }
+                else
+                {
+                    // Явная текстура (или заглушка, если нет ни иконки, ни модели)
+                    vgui::ImagePanel* pIconImage = new vgui::ImagePanel(pIconBtn, "SpawnIconImage");
+                    pIconImage->SetBounds(0, 0, iIconSize, iIconSize);
+                    pIconImage->SetImage(pIconPath[0] ? pIconPath : "vgui/hud/xbox_reticle");
+                    pIconImage->SetShouldScaleImage(true);
+                    pIconImage->SetMouseInputEnabled(false);
+                }
 
                 pIconBtn->SetKeyBoardInputEnabled(false);
 
@@ -135,6 +155,12 @@ void CSpawnMenu::LoadItemsFromConfig()
                     const char* pToolMode = pItem->GetString("mode", "0");
                     // Команда сначала выдаст игроку тулган, а затем переключит режим ConVar
                     Q_snprintf(szCommand, sizeof(szCommand), "use_tool %s", pToolMode);
+                }
+                else if (Q_strcmp(pType, "ragdoll") == 0)
+                {
+                    const char* pRagdollClass = pItem->GetString("class", "models/gman.mdl");
+                    // Команда сначала выдаст игроку тулган, а затем переключит режим ConVar
+                    Q_snprintf(szCommand, sizeof(szCommand), "spawn_item ragdoll %s", pRagdollClass);
                 }
                 else
                 {

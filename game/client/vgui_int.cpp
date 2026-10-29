@@ -23,6 +23,11 @@
 #include <KeyValues.h>
 #include "filesystem.h"
 #include "matsys_controls/matsyscontrols.h"
+#include <GameEventListener.h>
+
+#ifdef CreateEvent
+#undef CreateEvent
+#endif
 
 #ifdef SIXENSE
 #include "sixense/in_sixense.h"

@@ -7,53 +7,18 @@ Vector GetGModSpawnPosition(CBasePlayer* pPlayer, const char* modelName)
     Vector vecForward;
     AngleVectors(pPlayer->EyeAngles(), &vecForward);
 
-    // 1. Пускаем длинный луч (на 4000 юнитов) из глаз игрока туда, куда он смотрит
     trace_t tr;
-    UTIL_TraceLine(pPlayer->EyePosition(), pPlayer->EyePosition() + vecForward * 4000.0f, MASK_SOLID, pPlayer, COLLISION_GROUP_NONE, &tr);
+    UTIL_TraceLine(pPlayer->EyePosition(), pPlayer->EyePosition() + vecForward * 4000.0f,
+        MASK_SOLID, pPlayer, COLLISION_GROUP_NONE, &tr);
 
-    // Точка, куда попал прицел игрока (стена, пол или объект)
-    Vector spawnPos = tr.endpos;
-
-    // Если луч улетел в бесконечное небо и ни обо что не ударился, спавним просто перед лицом
     if (tr.fraction == 1.0f)
-    {
         return pPlayer->EyePosition() + vecForward * 150.0f;
-    }
 
-    // 2. ДИНАМИЧЕСКИЙ РАСЧЕТ ХИТБОКСА МОДЕЛИ (Чтобы проп не уходил под землю)
-    // Временно создаем виртуальный объект в памяти движка, чтобы узнать его реальные размеры
-    CBaseEntity::PrecacheModel(modelName);
-    CPhysicsProp* pTempProp = (CPhysicsProp*)CreateEntityByName("prop_physics");
-    if (pTempProp)
-    {
-        pTempProp->SetModelName(AllocPooledString(modelName));
-
-        Vector spawnPos = tr.endpos;
-
-        if (tr.fraction == 1.0f)
-        {
-            return pPlayer->EyePosition() + vecForward * 150.0f;
-        }
-
-        // Если мы смотрим на пол (нормаль луча смотрит вверх)
-        if (tr.plane.normal.z > 0.7f)
-        {
-            // Просто приподнимаем точку спавна на безопасную высоту (24-30 юнитов)
-            spawnPos.z += 24.0f;
-        }
-        // Если смотрим на стену
-        else if (abs(tr.plane.normal.z) < 0.3f)
-        {
-            // Отодвигаем от стены на 20 юнитов к игроку
-            spawnPos += tr.plane.normal * 20.0f;
-        }
-
-        return spawnPos;
-
-        // Уничтожаем временный виртуальный объект, он нам больше не нужен
-        UTIL_Remove(pTempProp);
-    }
-
+    Vector spawnPos = tr.endpos;
+    if (tr.plane.normal.z > 0.7f)
+        spawnPos.z += 24.0f;
+    else if (fabsf(tr.plane.normal.z) < 0.3f)
+        spawnPos += tr.plane.normal * 20.0f;
     return spawnPos;
 }
 
@@ -97,9 +62,10 @@ CON_COMMAND_F(spawn_item, "Universal spawn command for props, weapons, NPCs and 
         CBaseEntity* pWeapon = CreateEntityByName(pTarget);
         if (pWeapon)
         {
-            // Оружие спавним чуть-чуть повыше (на 10 юнитов), чтобы оно красиво упало на пол
+            pWeapon->Precache();
             pWeapon->SetAbsOrigin(spawnPos + Vector(0, 0, 10));
-            pWeapon->Spawn();
+            DispatchSpawn(pWeapon);
+            pWeapon->Activate();
         }
     }
     // СЦЕНАРИЙ 3: Спавн NPC
@@ -145,6 +111,22 @@ CON_COMMAND_F(spawn_item, "Universal spawn command for props, weapons, NPCs and 
 
             pVehicle->Spawn();
             pVehicle->Activate();
+        }
+    }
+    // СЦЕНАРИЙ 1: Физический проп
+    if (Q_strcmp(pType, "ragdoll") == 0)
+    {
+        CBaseEntity::PrecacheModel(pTarget);
+        CPhysicsProp* pProp = (CPhysicsProp*)CreateEntityByName("prop_ragdoll");
+        if (pProp)
+        {
+            pProp->SetModelName(AllocPooledString(pTarget));
+            pProp->SetAbsOrigin(spawnPos);
+            pProp->Spawn();
+
+            // Будим физику, чтобы объект сразу упал, если заспавнился на неровной поверхности
+            IPhysicsObject* pPhysObj = pProp->VPhysicsGetObject();
+            if (pPhysObj) pPhysObj->Wake();
         }
     }
 }
